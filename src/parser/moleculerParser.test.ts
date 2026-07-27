@@ -107,6 +107,28 @@ describe('MoleculerParser', () => {
     ])
   })
 
+  it('returns a Moleculer declaration outline for a service', () => {
+    const result = parser.parse('/svc/users.service.js', `
+      const Base = require("./base.mixin");
+      module.exports = {
+        name: "users",
+        mixins: [Base],
+        actions: { create() {} },
+        events: { "users.created"() {} },
+        methods: { validate() {} },
+        channels: { "users.created.channel"() {} },
+        hooks: { before: { create: ["validate"] } },
+      }
+    `)
+
+    expect(result.outline?.name).toBe('users')
+    expect(result.outline?.groups.map((group) => group.name)).toEqual([
+      'mixins', 'actions', 'events', 'methods', 'channels', 'hooks',
+    ])
+    expect(result.outline?.groups.find((group) => group.name === 'actions')?.children.map((child) => child.name)).toEqual(['create'])
+    expect(result.outline?.groups.find((group) => group.name === 'hooks')?.children.map((child) => child.name)).toEqual(['before'])
+  })
+
   it('returns an empty result for unparseable sources', () => {
     const result = parser.parse('/svc/broken.js', 'module.exports = { name: "x", ')
     expect(result.symbols).toEqual([])

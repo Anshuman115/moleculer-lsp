@@ -15,6 +15,8 @@ in fifteen services looks like fifteen unrelated strings. This server models bot
   methods resolve to their real declaration site.
 - **Find references** — every `ctx.call`, `ctx.emit`, `broker.broadcast`, hook string, and
   internal method call that reaches a symbol.
+- **Document symbols** — a Moleculer-aware file outline for services and mixins: actions,
+  events, methods, channels, mixins, and hook phases.
 - **Diagnostics** — unresolvable mixin requires, ambiguous event names, and calls to
   targets that do not exist in the workspace.
 

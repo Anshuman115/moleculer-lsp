@@ -2,9 +2,10 @@ import fs from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Index } from '../index/Index.js'
 import { Scanner } from '../scanner/scanner.js'
-import { SymbolKind, type Location as IndexLocation, type Symbol } from '../types.js'
+import { MoleculerParser } from '../parser/moleculerParser.js'
+import { SymbolKind, type Location as IndexLocation, type OutlineNode, type Symbol } from '../types.js'
 import { CursorKind, detect } from './cursor.js'
-import type { Location, Position, ReferenceParams, TextDocumentPositionParams } from './protocol.js'
+import { SymbolKind as LspSymbolKind, type DocumentSymbol, type DocumentSymbolParams, type Location, type Position, type ReferenceParams, type TextDocumentPositionParams } from './protocol.js'
 
 export class Handlers {
   private readonly documents = new Map<string, string>()
@@ -41,6 +42,35 @@ export class Handlers {
       result.unshift(this.symbolLocation(target.symbol))
     }
     return result
+  }
+
+  documentSymbols(params: DocumentSymbolParams): DocumentSymbol[] {
+    const filePath = uriToPath(params.textDocument.uri)
+    const source = this.sourceFor(params.textDocument.uri, filePath)
+    if (source === undefined) {
+      return []
+    }
+    const outline = new MoleculerParser().parse(filePath, source).outline
+    if (outline === undefined) {
+      return []
+    }
+    return [{
+      name: outline.name,
+      kind: LspSymbolKind.Object,
+      range: range(outline.line, outline.column, source),
+      selectionRange: selectionRange(outline.line, outline.column, outline.name.length),
+      children: outline.groups.map((group) => this.toDocumentSymbol(group, source)),
+    }]
+  }
+
+  private toDocumentSymbol(node: OutlineNode, source: string): DocumentSymbol {
+    return {
+      name: node.name,
+      kind: documentSymbolKind(node.kind),
+      range: range(node.line, node.column, source),
+      selectionRange: selectionRange(node.line, node.column, node.name.length),
+      children: node.children.map((child) => this.toDocumentSymbol(child, source)),
+    }
   }
 
   private referencesFor(symbol: Symbol, callerPath: string): IndexLocation[] {
@@ -175,6 +205,28 @@ export function uriToPath(uri: string): string {
 
 function pathToUri(filePath: string): string {
   return pathToFileURL(filePath).toString()
+}
+
+function documentSymbolKind(kind: OutlineNode['kind']): number {
+  if (kind === 'mixin') return LspSymbolKind.Module
+  if (kind === 'group' || kind === 'hookPhase') return LspSymbolKind.Namespace
+  if (kind === 'event' || kind === 'channel') return LspSymbolKind.Event
+  return LspSymbolKind.Method
+}
+
+function selectionRange(line: number, character: number, length: number): { start: Position; end: Position } {
+  return {
+    start: { line, character },
+    end: { line, character: character + length },
+  }
+}
+
+function range(line: number, character: number, source: string): { start: Position; end: Position } {
+  const lastLine = source.split('\n').length - 1
+  return {
+    start: { line, character },
+    end: { line: lastLine, character: (source.split('\n')[lastLine] ?? '').length },
+  }
 }
 
 function shortName(fullName: string): string {

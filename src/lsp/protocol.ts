@@ -33,6 +33,26 @@ export interface ReferenceParams extends TextDocumentPositionParams {
   context?: { includeDeclaration?: boolean }
 }
 
+export interface DocumentSymbolParams {
+  textDocument: TextDocumentIdentifier
+}
+
+export interface DocumentSymbol {
+  name: string
+  kind: number
+  range: Range
+  selectionRange: Range
+  children?: DocumentSymbol[]
+}
+
+export const SymbolKind = {
+  Module: 2,
+  Namespace: 3,
+  Method: 6,
+  Object: 19,
+  Event: 24,
+} as const
+
 export interface Diagnostic {
   range: Range
   severity: DiagnosticSeverity

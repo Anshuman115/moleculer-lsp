@@ -18,7 +18,7 @@ import {
   walk,
   type AstNode,
 } from './ast.js'
-import { ReferenceKind, SymbolKind, type MixinRequest, type ParseResult, type Reference, type Symbol } from '../types.js'
+import { ReferenceKind, SymbolKind, type DocumentOutline, type MixinRequest, type OutlineNode, type ParseResult, type Reference, type Symbol } from '../types.js'
 
 const reservedThisProps = new Set([
   'broker', 'logger', 'actions', 'settings', 'metadata', 'schema', 'Promise', 'name', 'version',
@@ -49,6 +49,7 @@ export class MoleculerParser {
       references: [...extractReferences(ast), ...extractHookReferences(service)],
       mixins: extractMixins(service, filePath, requirePaths(ast)),
       isService: named,
+      outline: extractOutline(service, named ? namespace : outlineName(filePath)),
     }
   }
 
@@ -138,6 +139,66 @@ function extractSymbols(service: AstNode, namespace: string): Symbol[] {
       }]
     })
   })
+}
+
+function extractOutline(service: AstNode, name: string): DocumentOutline {
+  const groups: OutlineNode[] = []
+  const mixins = objectProperty(service, 'mixins')
+  if (mixins !== undefined) {
+    groups.push(group('mixins', mixins, elements(mixins).flatMap((mixin) => {
+      const mixinName = identifier(mixin)
+      return mixinName === undefined ? [] : [node(mixinName, 'mixin', mixin)]
+    })))
+  }
+  for (const [blockName, kind] of symbolBlocks) {
+    const block = objectProperty(service, blockName)
+    if (block === undefined) {
+      continue
+    }
+    groups.push(group(blockName, block, properties(block).flatMap((property) => {
+      const name = propertyKey(property)
+      if (name === undefined || name === 'handler') {
+        return []
+      }
+      const key = isNode(property.key) ? property.key : property
+      return [node(name, outlineKind(kind), key)]
+    })))
+  }
+  const hooks = objectProperty(service, 'hooks')
+  if (hooks !== undefined) {
+    groups.push(group('hooks', hooks, ['before', 'after', 'error'].flatMap((phase) => {
+      const phaseValue = objectProperty(hooks, phase)
+      if (phaseValue === undefined) {
+        return []
+      }
+      return [group(phase, phaseValue, properties(phaseValue).flatMap((property) => {
+        const action = propertyKey(property)
+        const key = isNode(property.key) ? property.key : property
+        return action === undefined ? [] : [node(action, 'hook', key)]
+      }), 'hookPhase')]
+    })))
+  }
+  return { name, line: line(service), column: column(service), groups }
+}
+
+function group(name: string, source: AstNode, children: OutlineNode[], kind: OutlineNode['kind'] = 'group'): OutlineNode {
+  return { name, kind, line: line(source), column: column(source), children }
+}
+
+function node(name: string, kind: OutlineNode['kind'], source: AstNode): OutlineNode {
+  return { name, kind, line: line(source), column: column(source), children: [] }
+}
+
+function outlineKind(kind: SymbolKind): OutlineNode['kind'] {
+  if (kind === SymbolKind.Action) return 'action'
+  if (kind === SymbolKind.Event) return 'event'
+  if (kind === SymbolKind.Channel) return 'channel'
+  return 'method'
+}
+
+function outlineName(filePath: string): string {
+  const base = filePath.split('/').pop() ?? filePath
+  return base.replace(/\.js$/, '')
 }
 
 function extractClassMethods(ast: AstNode, namespace: string): Symbol[] {

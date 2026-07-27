@@ -5,7 +5,7 @@ import { Scanner } from '../scanner/scanner.js'
 import { Watcher } from '../scanner/watcher.js'
 import { diagnosticsByFile } from './diagnostics.js'
 import { Handlers, uriToPath } from './handlers.js'
-import { ErrorCodes, isRecord, type Diagnostic, type Position, type ReferenceParams, type RequestMessage, type TextDocumentPositionParams } from './protocol.js'
+import { ErrorCodes, isRecord, type Diagnostic, type DocumentSymbolParams, type Position, type ReferenceParams, type RequestMessage, type TextDocumentPositionParams } from './protocol.js'
 import { MessageFormatError, Transport } from './transport.js'
 
 enum ScanState {
@@ -103,6 +103,9 @@ export class Server {
       case 'textDocument/references':
         this.documentRequest(message)
         return
+      case 'textDocument/documentSymbol':
+        this.documentSymbolRequest(message)
+        return
       default:
         if (message.id !== undefined) {
           this.transport.writeError(message.id, ErrorCodes.MethodNotFound, `method not found: ${message.method}`)
@@ -126,6 +129,7 @@ export class Server {
         textDocumentSync: { openClose: true, change: 1, save: true },
         definitionProvider: true,
         referencesProvider: true,
+        documentSymbolProvider: true,
         diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false },
       },
       serverInfo: { name: 'moleculer-lsp', version: '0.1.0' },
@@ -184,6 +188,18 @@ export class Server {
       return
     }
     this.transport.writeResult(message.id, this.handlers.references(referenceParams(message.params)))
+  }
+
+  private documentSymbolRequest(message: RequestMessage): void {
+    if (this.scanState === ScanState.Pending) {
+      this.queued.push(message)
+      return
+    }
+    if (this.scanState === ScanState.Failed) {
+      this.transport.writeError(message.id, ErrorCodes.ServerNotInitialized, `index unavailable: ${this.scanError}`)
+      return
+    }
+    this.transport.writeResult(message.id, this.handlers.documentSymbols(documentSymbolParams(message.params)))
   }
 
   private didOpen(params: unknown): void {
@@ -263,6 +279,11 @@ function referenceParams(params: unknown): ReferenceParams {
     ...positionParams(params),
     context: { includeDeclaration: context.includeDeclaration === true },
   }
+}
+
+function documentSymbolParams(params: unknown): DocumentSymbolParams {
+  const document = textDocument(params)
+  return { textDocument: { uri: document?.uri ?? '' } }
 }
 
 function pathUri(filePath: string): string {

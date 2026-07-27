@@ -49,11 +49,27 @@ export interface MixinRequest {
   sourceFile: string
 }
 
+export interface OutlineNode {
+  name: string
+  kind: 'root' | 'group' | 'action' | 'event' | 'method' | 'channel' | 'mixin' | 'hookPhase' | 'hook'
+  line: number
+  column: number
+  children: OutlineNode[]
+}
+
+export interface DocumentOutline {
+  name: string
+  line: number
+  column: number
+  groups: OutlineNode[]
+}
+
 export interface ParseResult {
   symbols: Symbol[]
   references: Reference[]
   mixins: MixinRequest[]
   isService: boolean
+  outline?: DocumentOutline
 }
 
 export interface DroppedReference {
