@@ -1,0 +1,16 @@
+{
+    "moleculer": {
+        "command": "node",
+        "args": [
+            "${CLAUDE_PLUGIN_ROOT}/dist/main.js",
+            "--stdio"
+        ],
+        "extensionToLanguage": {
+            ".js": "javascript"
+        },
+        "transport": "stdio",
+        "initializationOptions": {},
+        "settings": {},
+        "maxRestarts": 3
+    }
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "moleculer-tools",
+  "version": "0.1.0",
+  "description": "Claude Code tools for Moleculer.js projects",
+  "owner": {
+    "name": "Anshuman Tripathy"
+  },
+  "plugins": [
+    {
+      "name": "moleculer-lsp",
+      "source": "./",
+      "description": "Go to definition, references, and diagnostics for Moleculer.js services",
+      "category": "development",
+      "tags": [
+        "moleculer",
+        "moleculerjs",
+        "javascript",
+        "lsp",
+        "language-server"
+      ]
+    }
+  ]
+}
