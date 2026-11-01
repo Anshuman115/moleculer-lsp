@@ -1,5 +1,5 @@
 import { Index } from '../index/Index.js'
-import { SELF_PREFIX } from '../parser/moleculerParser.js'
+import { isSelfRef, selfMethod } from '../parser/moleculerParser.js'
 import { Scanner } from '../scanner/scanner.js'
 import { DropReason, SymbolKind, type DroppedReference, type MixinFailure } from '../types.js'
 import { DiagnosticSeverity, type Diagnostic } from './protocol.js'
@@ -47,7 +47,7 @@ function mixinDiagnostic(failure: MixinFailure): Diagnostic {
 }
 
 function referenceDiagnostic(dropped: DroppedReference): Diagnostic | undefined {
-  const range = pointRange(dropped.location.line, dropped.location.column, dropped.fullName.length)
+  const range = referenceRange(dropped)
   if (dropped.reason === DropReason.NameCollision) {
     return {
       range,
@@ -123,8 +123,15 @@ function collisionDiagnostics(index: Index): Array<[number, Diagnostic]> {
   return results
 }
 
+function referenceRange(dropped: DroppedReference): Diagnostic['range'] {
+  if (isSelfRef(dropped.fullName)) {
+    return pointRange(dropped.location.line, dropped.location.column, selfMethod(dropped.fullName).length)
+  }
+  return pointRange(dropped.location.line, dropped.location.column + 1, dropped.fullName.length)
+}
+
 function displayName(fullName: string): string {
-  return fullName.startsWith(SELF_PREFIX) ? `this.${fullName.slice(SELF_PREFIX.length)}` : fullName
+  return isSelfRef(fullName) ? `this.${selfMethod(fullName)}` : fullName
 }
 
 function pointRange(line: number, column: number, length: number): Diagnostic['range'] {

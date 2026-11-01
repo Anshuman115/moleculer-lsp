@@ -17,6 +17,10 @@ export class StringPool {
     return this.values[id] ?? ''
   }
 
+  find(value: string): number | undefined {
+    return this.ids.get(value)
+  }
+
   size(): number {
     return this.values.length - 1
   }

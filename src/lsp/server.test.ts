@@ -17,6 +17,15 @@ afterEach(() => {
 
 interface Pending {
   resolve: (value: unknown) => void
+  reject: (error: Error) => void
+}
+
+interface Incoming {
+  id?: unknown
+  method?: string
+  params?: unknown
+  result?: unknown
+  error?: { message: string }
 }
 
 class Client {
@@ -26,6 +35,8 @@ class Client {
   private readonly waiting = new Map<number, Pending>()
   private nextId = 1
   private readonly server: Server
+  readonly notifications: Array<{ method: string; params: unknown }> = []
+  private readonly notificationWaiters = new Map<string, Array<(params: unknown) => void>>()
 
   constructor() {
     this.outbound.on('data', (chunk: Buffer) => {
@@ -38,14 +49,26 @@ class Client {
 
   request(method: string, params: unknown): Promise<unknown> {
     const id = this.nextId++
-    return new Promise<unknown>((resolve) => {
-      this.waiting.set(id, { resolve })
+    return new Promise<unknown>((resolve, reject) => {
+      this.waiting.set(id, { resolve, reject })
       this.send({ jsonrpc: '2.0', id, method, params })
     })
   }
 
   notify(method: string, params: unknown): void {
     this.send({ jsonrpc: '2.0', method, params })
+  }
+
+  async waitForNotification(method: string): Promise<unknown> {
+    const seen = this.notifications.find((entry) => entry.method === method)
+    if (seen !== undefined) {
+      return seen.params
+    }
+    return new Promise<unknown>((resolve) => {
+      const waiters = this.notificationWaiters.get(method) ?? []
+      waiters.push(resolve)
+      this.notificationWaiters.set(method, waiters)
+    })
   }
 
   stop(): void {
@@ -77,12 +100,31 @@ class Client {
   }
 
   private dispatch(body: string): void {
-    const message = JSON.parse(body) as { id?: number; result?: unknown }
+    const message = JSON.parse(body) as Incoming
+    if (typeof message.method === 'string') {
+      this.notifications.push({ method: message.method, params: message.params })
+      const waiters = this.notificationWaiters.get(message.method)
+      if (waiters !== undefined) {
+        this.notificationWaiters.delete(message.method)
+        for (const waiter of waiters) {
+          waiter(message.params)
+        }
+      }
+      return
+    }
     if (typeof message.id !== 'number') {
       return
     }
-    this.waiting.get(message.id)?.resolve(message.result)
+    const pending = this.waiting.get(message.id)
+    if (pending === undefined) {
+      return
+    }
     this.waiting.delete(message.id)
+    if (message.error !== undefined) {
+      pending.reject(new Error(message.error.message))
+      return
+    }
+    pending.resolve(message.result)
   }
 }
 
@@ -92,26 +134,113 @@ function positionOf(source: string, needle: string): { line: number; character: 
     throw new Error(`missing ${needle}`)
   }
   const before = source.slice(0, index)
-  const line = before.split('\n').length - 1
-  const character = index - (before.lastIndexOf('\n') + 1)
-  return { line, character }
+  return {
+    line: before.split('\n').length - 1,
+    character: index - (before.lastIndexOf('\n') + 1),
+  }
 }
 
-function startServer(): Client {
-  const client = new Client()
-  return client
+const pullCapabilities = {
+  textDocument: { diagnostic: {} },
+  workspace: { diagnostics: { refreshSupport: true } },
 }
 
-async function initialize(client: Client): Promise<void> {
-  await client.request('initialize', {
+async function initialize(client: Client, capabilities: unknown): Promise<{ capabilities: Record<string, unknown> }> {
+  const result = await client.request('initialize', {
     processId: process.pid,
     rootUri: `file://${root}`,
-    capabilities: {},
-  })
+    capabilities,
+  }) as { capabilities: Record<string, unknown> }
   client.notify('initialized', {})
+  return result
 }
 
-describe('Server pull requests', () => {
+const ghostFixture = [
+  'module.exports = {',
+  '  name: "caller",',
+  '  actions: {',
+  '    run: { async handler(ctx) { this.unknownMethod(); return ctx.call("ghost.action", {}) } },',
+  '  },',
+  '}',
+].join('\n')
+
+describe('Server pull diagnostics', () => {
+  it('advertises pull diagnostics when the client supports them', async () => {
+    const client = new Client()
+    try {
+      const result = await initialize(client, pullCapabilities)
+      expect(result.capabilities.diagnosticProvider).toEqual({
+        interFileDependencies: true,
+        workspaceDiagnostics: false,
+      })
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('answers textDocument/diagnostic with a full report', async () => {
+    const filePath = path.join(root, 'caller.service.js')
+    fs.writeFileSync(filePath, ghostFixture)
+
+    const client = new Client()
+    try {
+      await initialize(client, pullCapabilities)
+
+      const report = await client.request('textDocument/diagnostic', {
+        textDocument: { uri: `file://${filePath}` },
+      }) as { kind: string; items: Array<{ message: string }> }
+
+      expect(report.kind).toBe('full')
+      expect(report.items.map((item) => item.message)).toContainEqual(
+        expect.stringContaining('"this.unknownMethod"'),
+      )
+      expect(report.items.map((item) => item.message)).not.toContainEqual(
+        expect.stringContaining('#self.'),
+      )
+      expect(report.items.map((item) => item.message)).toContainEqual(
+        expect.stringContaining('"ghost.action"'),
+      )
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('keeps pushing diagnostics for clients without pull support', async () => {
+    const filePath = path.join(root, 'caller.service.js')
+    fs.writeFileSync(filePath, ghostFixture)
+
+    const client = new Client()
+    try {
+      const result = await initialize(client, {})
+      expect(result.capabilities.diagnosticProvider).toBeUndefined()
+
+      const params = await client.waitForNotification('textDocument/publishDiagnostics') as {
+        uri: string
+        diagnostics: Array<{ message: string }>
+      }
+      expect(params.uri.endsWith('caller.service.js')).toBe(true)
+      expect(params.diagnostics.map((item) => item.message)).toContainEqual(
+        expect.stringContaining('"ghost.action"'),
+      )
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('rejects a diagnostic pull without a document uri', async () => {
+    const client = new Client()
+    try {
+      await initialize(client, pullCapabilities)
+      await expect(client.request('textDocument/diagnostic', {})).rejects.toThrow(
+        /requires a document uri/,
+      )
+    } finally {
+      client.stop()
+    }
+  })
+})
+
+describe('Server navigation', () => {
   it('resolves an action string from the service segment to the action definition', async () => {
     const callSite = 'ctx.call("mongoprovider.getBooking", {})'
     fs.writeFileSync(path.join(root, 'mongo.service.js'), [
@@ -133,9 +262,9 @@ describe('Server pull requests', () => {
     ].join('\n')
     fs.writeFileSync(callerPath, callerSource)
 
-    const client = startServer()
+    const client = new Client()
     try {
-      await initialize(client)
+      await initialize(client, pullCapabilities)
       const position = positionOf(callerSource, 'mongoprovider')
 
       const definition = await client.request('textDocument/definition', {
@@ -160,35 +289,38 @@ describe('Server pull requests', () => {
     }
   })
 
-  it('answers textDocument/diagnostic with a full report', async () => {
-    const brokenPath = path.join(root, 'caller.service.js')
-    fs.writeFileSync(brokenPath, [
+  it('falls back to the service file for an unknown action', async () => {
+    fs.writeFileSync(path.join(root, 'ghost.service.js'), [
       'module.exports = {',
-      '  name: "caller",',
+      '  name: "ghostsvc",',
       '  actions: {',
-      '    run: { async handler(ctx) { this.unknownMethod(); return ctx.call("ghost.action", {}) } },',
+      '    ping: { handler() { return 1 } },',
       '  },',
       '}',
     ].join('\n'))
+    const callerPath = path.join(root, 'other.service.js')
+    const callerSource = [
+      'module.exports = {',
+      '  name: "other",',
+      '  actions: {',
+      '    run: { async handler(ctx) { return ctx.call("ghostsvc.missingAction", {}) } },',
+      '  },',
+      '}',
+    ].join('\n')
+    fs.writeFileSync(callerPath, callerSource)
 
-    const client = startServer()
+    const client = new Client()
     try {
-      await initialize(client)
+      await initialize(client, pullCapabilities)
+      const position = positionOf(callerSource, 'ghostsvc')
 
-      const report = await client.request('textDocument/diagnostic', {
-        textDocument: { uri: `file://${brokenPath}` },
-      }) as { kind: string; items: Array<{ message: string; source: string }> }
+      const definition = await client.request('textDocument/definition', {
+        textDocument: { uri: `file://${callerPath}` },
+        position,
+      }) as { uri: string; range: { start: { line: number } } } | null
 
-      expect(report.kind).toBe('full')
-      expect(report.items.map((item) => item.message)).toContainEqual(
-        expect.stringContaining('"this.unknownMethod"'),
-      )
-      expect(report.items.map((item) => item.message)).not.toContainEqual(
-        expect.stringContaining('#self.'),
-      )
-      expect(report.items.map((item) => item.message)).toContainEqual(
-        expect.stringContaining('"ghost.action"'),
-      )
+      expect(definition?.uri.endsWith('ghost.service.js')).toBe(true)
+      expect(definition?.range.start.line).toBe(0)
     } finally {
       client.stop()
     }

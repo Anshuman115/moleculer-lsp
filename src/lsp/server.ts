@@ -25,6 +25,9 @@ export class Server {
   private rootPath = process.cwd()
   private scanState = ScanState.Pending
   private scanError = ''
+  private pullDiagnostics = false
+  private refreshSupport = false
+  private nextServerRequestId = 1
 
   constructor(readable: Readable, writable: Writable) {
     this.transport = new Transport(readable, writable)
@@ -72,6 +75,9 @@ export class Server {
   }
 
   private route(message: RequestMessage): void {
+    if (typeof message.method !== 'string') {
+      return
+    }
     switch (message.method) {
       case 'initialize':
         this.initialize(message)
@@ -127,13 +133,21 @@ export class Server {
         this.rootPath = fileURLToPath(first.uri)
       }
     }
+    const capabilities = isRecord(params.capabilities) ? params.capabilities : {}
+    const textDocument = isRecord(capabilities.textDocument) ? capabilities.textDocument : {}
+    const workspace = isRecord(capabilities.workspace) ? capabilities.workspace : {}
+    const workspaceDiagnostics = isRecord(workspace.diagnostics) ? workspace.diagnostics : {}
+    this.pullDiagnostics = isRecord(textDocument.diagnostic)
+    this.refreshSupport = workspaceDiagnostics.refreshSupport === true
     this.transport.writeResult(message.id, {
       capabilities: {
         textDocumentSync: { openClose: true, change: 1, save: true },
         definitionProvider: true,
         referencesProvider: true,
         documentSymbolProvider: true,
-        diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false },
+        ...(this.pullDiagnostics
+          ? { diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false } }
+          : {}),
       },
       serverInfo: { name: 'moleculer-lsp', version: '0.1.0' },
     })
@@ -215,8 +229,12 @@ export class Server {
       return
     }
     const document = textDocument(message.params)
-    const fileId = document === undefined ? 0 : this.index.fileId(uriToPath(document.uri))
-    const items = diagnosticsByFile(this.index, this.scanner).get(fileId) ?? []
+    if (document === undefined) {
+      this.transport.writeError(message.id, ErrorCodes.InvalidParams, 'textDocument/diagnostic requires a document uri')
+      return
+    }
+    const fileId = this.index.fileIdOf(uriToPath(document.uri))
+    const items = fileId === undefined ? [] : diagnosticsByFile(this.index, this.scanner).get(fileId) ?? []
     this.transport.writeResult(message.id, { kind: 'full', items })
   }
 
@@ -249,6 +267,12 @@ export class Server {
   }
 
   private publishDiagnostics(): void {
+    if (this.pullDiagnostics) {
+      if (this.refreshSupport) {
+        this.transport.writeRequest(this.nextServerRequestId++, 'workspace/diagnostic/refresh', {})
+      }
+      return
+    }
     const byFile = diagnosticsByFile(this.index, this.scanner)
     const current = new Set<string>()
     for (const [fileId, diagnostics] of byFile) {

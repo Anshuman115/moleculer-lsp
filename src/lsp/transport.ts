@@ -36,6 +36,10 @@ export class Transport {
     this.send({ jsonrpc: '2.0', method, params })
   }
 
+  writeRequest(id: unknown, method: string, params: unknown): void {
+    this.send({ jsonrpc: '2.0', id, method, params })
+  }
+
   private send(payload: unknown): void {
     const body = Buffer.from(JSON.stringify(payload), 'utf8')
     this.writable.write(`Content-Length: ${body.length}\r\n\r\n`)

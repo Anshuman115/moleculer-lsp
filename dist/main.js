@@ -1784,6 +1784,9 @@ var StringPool = class {
   get(id) {
     return this.values[id] ?? "";
   }
+  find(value) {
+    return this.ids.get(value);
+  }
   size() {
     return this.values.length - 1;
   }
@@ -1801,6 +1804,9 @@ var Index = class {
   }
   fileId(filePath) {
     return this.pool.intern(filePath);
+  }
+  fileIdOf(filePath) {
+    return this.pool.find(filePath);
   }
   filePath(fileId) {
     return this.pool.get(fileId);
@@ -8447,7 +8453,7 @@ function mixinDiagnostic(failure) {
   };
 }
 function referenceDiagnostic(dropped) {
-  const range2 = pointRange(dropped.location.line, dropped.location.column, dropped.fullName.length);
+  const range2 = referenceRange(dropped);
   if (dropped.reason === "name-collision" /* NameCollision */) {
     return {
       range: range2,
@@ -8511,8 +8517,14 @@ function collisionDiagnostics(index) {
   }
   return results;
 }
+function referenceRange(dropped) {
+  if (isSelfRef(dropped.fullName)) {
+    return pointRange(dropped.location.line, dropped.location.column, selfMethod(dropped.fullName).length);
+  }
+  return pointRange(dropped.location.line, dropped.location.column + 1, dropped.fullName.length);
+}
 function displayName(fullName) {
-  return fullName.startsWith(SELF_PREFIX) ? `this.${fullName.slice(SELF_PREFIX.length)}` : fullName;
+  return isSelfRef(fullName) ? `this.${selfMethod(fullName)}` : fullName;
 }
 function pointRange(line2, column2, length) {
   return {
@@ -8984,6 +8996,9 @@ var Transport = class {
   writeNotification(method, params) {
     this.send({ jsonrpc: "2.0", method, params });
   }
+  writeRequest(id, method, params) {
+    this.send({ jsonrpc: "2.0", id, method, params });
+  }
   send(payload) {
     const body = Buffer.from(JSON.stringify(payload), "utf8");
     this.writable.write(`Content-Length: ${body.length}\r
@@ -9041,6 +9056,9 @@ var Server = class {
   rootPath = process.cwd();
   scanState = "pending" /* Pending */;
   scanError = "";
+  pullDiagnostics = false;
+  refreshSupport = false;
+  nextServerRequestId = 1;
   constructor(readable, writable) {
     this.transport = new Transport(readable, writable);
     this.watcher = new Watcher(() => this.rescan());
@@ -9084,6 +9102,9 @@ var Server = class {
     }
   }
   route(message) {
+    if (typeof message.method !== "string") {
+      return;
+    }
     switch (message.method) {
       case "initialize":
         this.initialize(message);
@@ -9138,13 +9159,19 @@ var Server = class {
         this.rootPath = fileURLToPath2(first.uri);
       }
     }
+    const capabilities = isRecord(params.capabilities) ? params.capabilities : {};
+    const textDocument2 = isRecord(capabilities.textDocument) ? capabilities.textDocument : {};
+    const workspace = isRecord(capabilities.workspace) ? capabilities.workspace : {};
+    const workspaceDiagnostics = isRecord(workspace.diagnostics) ? workspace.diagnostics : {};
+    this.pullDiagnostics = isRecord(textDocument2.diagnostic);
+    this.refreshSupport = workspaceDiagnostics.refreshSupport === true;
     this.transport.writeResult(message.id, {
       capabilities: {
         textDocumentSync: { openClose: true, change: 1, save: true },
         definitionProvider: true,
         referencesProvider: true,
         documentSymbolProvider: true,
-        diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false }
+        ...this.pullDiagnostics ? { diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false } } : {}
       },
       serverInfo: { name: "moleculer-lsp", version: "0.1.0" }
     });
@@ -9220,8 +9247,12 @@ var Server = class {
       return;
     }
     const document = textDocument(message.params);
-    const fileId = document === void 0 ? 0 : this.index.fileId(uriToPath(document.uri));
-    const items = diagnosticsByFile(this.index, this.scanner).get(fileId) ?? [];
+    if (document === void 0) {
+      this.transport.writeError(message.id, ErrorCodes.InvalidParams, "textDocument/diagnostic requires a document uri");
+      return;
+    }
+    const fileId = this.index.fileIdOf(uriToPath(document.uri));
+    const items = fileId === void 0 ? [] : diagnosticsByFile(this.index, this.scanner).get(fileId) ?? [];
     this.transport.writeResult(message.id, { kind: "full", items });
   }
   didOpen(params) {
@@ -9249,6 +9280,12 @@ var Server = class {
     }
   }
   publishDiagnostics() {
+    if (this.pullDiagnostics) {
+      if (this.refreshSupport) {
+        this.transport.writeRequest(this.nextServerRequestId++, "workspace/diagnostic/refresh", {});
+      }
+      return;
+    }
     const byFile = diagnosticsByFile(this.index, this.scanner);
     const current2 = /* @__PURE__ */ new Set();
     for (const [fileId, diagnostics] of byFile) {

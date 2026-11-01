@@ -17,6 +17,10 @@ export class Index {
     return this.pool.intern(filePath)
   }
 
+  fileIdOf(filePath: string): number | undefined {
+    return this.pool.find(filePath)
+  }
+
   filePath(fileId: number): string {
     return this.pool.get(fileId)
   }
