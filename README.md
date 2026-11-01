@@ -88,7 +88,7 @@ claude plugin install moleculer-lsp@moleculer-tools
 
 ### oh-my-pi (omp)
 
-`~/.omp/agent/lsp.json`:
+omp does not detect `moleculer-lsp` automatically. Register it in `~/.omp/agent/lsp.json`:
 
 ```json
 {
@@ -97,12 +97,28 @@ claude plugin install moleculer-lsp@moleculer-tools
       "command": "moleculer-lsp",
       "args": ["--stdio"],
       "fileTypes": [".js"],
-      "languageId": "javascript",
-      "rootMarkers": ["package.json"]
+      "rootMarkers": ["moleculer.config.js"]
     }
   }
 }
 ```
+
+The server starts in projects that contain `moleculer.config.js`. For projects without that file, use `["package.json"]`.
+
+omp sends go-to-definition, references and rename to the first server that accepts the file. Its built-in TypeScript server also accepts `.js` and is listed first, so it answers those requests. To route them to `moleculer-lsp`, add `.omp/lsp.json` to the Moleculer project:
+
+```json
+{
+  "servers": {
+    "typescript-native": { "isLinter": true },
+    "typescript-language-server": { "isLinter": true }
+  }
+}
+```
+
+In that project, go-to-definition on plain JavaScript identifiers then returns no result. Diagnostics from both servers are still shown.
+
+Restart omp after you install or update `moleculer-lsp`.
 
 ## Features
 
