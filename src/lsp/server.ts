@@ -92,7 +92,6 @@ export class Server {
       case 'exit':
         this.watcher.close()
         process.exit(0)
-        return
       case 'textDocument/didOpen':
         this.didOpen(message.params)
         return
