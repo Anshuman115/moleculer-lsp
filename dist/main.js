@@ -9048,7 +9048,7 @@ function contentLength(header) {
 // package.json
 var package_default = {
   name: "moleculer-lsp",
-  version: "0.1.0",
+  version: "0.1.1",
   description: "Language server for Moleculer.js: go to definition, find references, document symbols and diagnostics across services, mixins and events",
   keywords: [
     "moleculer",
