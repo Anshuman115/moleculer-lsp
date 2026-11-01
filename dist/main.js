@@ -9002,10 +9002,10 @@ var Transport = class {
   }
   send(payload) {
     const body = Buffer.from(JSON.stringify(payload), "utf8");
-    this.writable.write(`Content-Length: ${body.length}\r
+    const header = Buffer.from(`Content-Length: ${body.length}\r
 \r
-`);
-    this.writable.write(body);
+`, "utf8");
+    this.writable.write(Buffer.concat([header, body]));
   }
   takeMessage() {
     const headerEnd = this.buffer.indexOf("\r\n\r\n");

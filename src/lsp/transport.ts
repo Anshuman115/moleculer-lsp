@@ -42,8 +42,8 @@ export class Transport {
 
   private send(payload: unknown): void {
     const body = Buffer.from(JSON.stringify(payload), 'utf8')
-    this.writable.write(`Content-Length: ${body.length}\r\n\r\n`)
-    this.writable.write(body)
+    const header = Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, 'utf8')
+    this.writable.write(Buffer.concat([header, body]))
   }
 
   private takeMessage(): Buffer | undefined {
