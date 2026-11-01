@@ -4,12 +4,27 @@ import { Index } from './index/Index.js'
 import { MoleculerParser } from './parser/moleculerParser.js'
 import { Scanner } from './scanner/scanner.js'
 import { Server } from './lsp/server.js'
+import { VERSION } from './version.js'
+
+const usage = `Usage: moleculer-lsp [options]
+
+Options:
+  --stdio          Start the language server over stdio (default)
+  --scan <dir>     Index a workspace and print a summary
+  --parse <file>   Print symbols and references for one file
+  --version        Print the version
+  --help           Print this help
+`
 
 async function main(args: string[]): Promise<void> {
   const command = args.find((arg) => !arg.startsWith('--stdio'))
 
   if (command === '--version') {
-    process.stdout.write('moleculer-lsp 0.1.0\n')
+    process.stdout.write(`moleculer-lsp ${VERSION}\n`)
+    return
+  }
+  if (command === '--help' || command === '-h') {
+    process.stdout.write(usage)
     return
   }
   if (command === '--parse') {

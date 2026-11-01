@@ -310,7 +310,7 @@ describe('Scanner', () => {
     expect(index.referencesTo('user-consumer.user.addaccount')).toHaveLength(1)
   })
 
-  it('recognizes broker.sendToChannel(...) as a broadcast-style reference', () => {
+  it('recognizes broker.sendToChannel(...) as a channel reference', () => {
     write('gateway.service.js', `
       module.exports = {
         name: "gateway",
@@ -330,5 +330,28 @@ describe('Scanner', () => {
 
     const { index } = scan()
     expect(index.referencesTo('orders.orders.created')).toHaveLength(1)
+  })
+
+  it('resolves broadcast(...) against event listeners', () => {
+    write('cache.service.js', `
+      module.exports = {
+        name: "cache",
+        actions: {
+          run(ctx) {
+            return ctx.broadcast("cache.cleared")
+          },
+        },
+      }
+    `)
+    write('listener.service.js', `
+      module.exports = {
+        name: "listener",
+        events: { "cache.cleared"(ctx) { return ctx.params } },
+      }
+    `)
+
+    const { index, result } = scan()
+    expect(index.referencesTo('listener.cache.cleared')).toHaveLength(1)
+    expect(result.dropped).toHaveLength(0)
   })
 })

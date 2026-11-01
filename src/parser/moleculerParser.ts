@@ -299,7 +299,7 @@ function extractReferences(ast: AstNode): Reference[] {
         references.push({
           fullName: target,
           location: { fileId: 0, line: line(arg ?? node), column: column(arg ?? node) },
-          kind: method === 'sendToChannel' ? ReferenceKind.Broadcast : ReferenceKind.Emit,
+          kind: method === 'sendToChannel' ? ReferenceKind.Channel : ReferenceKind.Emit,
         })
       }
       return

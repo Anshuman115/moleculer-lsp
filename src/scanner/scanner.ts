@@ -209,7 +209,7 @@ export class Scanner {
       return { fullName: `${record.namespace}.${selfMethod(reference.fullName)}` }
     }
 
-    if (reference.kind === ReferenceKind.Emit || reference.kind === ReferenceKind.Broadcast) {
+    if (reference.kind === ReferenceKind.Emit || reference.kind === ReferenceKind.Broadcast || reference.kind === ReferenceKind.Channel) {
       return this.resolveEvent(record, reference)
     }
 
@@ -223,7 +223,7 @@ export class Scanner {
     if (this.index.has(reference.fullName)) {
       return { fullName: reference.fullName }
     }
-    const targetKind = reference.kind === ReferenceKind.Broadcast ? SymbolKind.Channel : SymbolKind.Event
+    const targetKind = reference.kind === ReferenceKind.Channel ? SymbolKind.Channel : SymbolKind.Event
     const matches = this.index.allSymbols().filter(
       (symbol) => symbol.kind === targetKind && symbol.name === reference.fullName,
     )

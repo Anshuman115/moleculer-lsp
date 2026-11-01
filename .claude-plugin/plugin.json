@@ -1,7 +1,7 @@
 {
   "name": "moleculer-lsp",
   "version": "0.1.0",
-  "description": "Language server for Moleculer.js microservices — go to definition, references, and diagnostics across services, mixins, and events",
+  "description": "Language server for Moleculer.js: go to definition, find references, document symbols and diagnostics across services, mixins and events",
   "author": {
     "name": "Anshuman Tripathy"
   },

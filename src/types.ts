@@ -9,6 +9,7 @@ export enum ReferenceKind {
   Call = 'call',
   Emit = 'emit',
   Broadcast = 'broadcast',
+  Channel = 'channel',
 }
 
 export enum DropReason {

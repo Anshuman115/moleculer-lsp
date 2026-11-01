@@ -163,7 +163,7 @@ describe('MoleculerParser', () => {
     expect(names).not.toContain('transactions.system')
   })
 
-  it('captures broker.sendToChannel(...) as a broadcast-style reference', () => {
+  it('captures broker.sendToChannel(...) as a channel reference', () => {
     const result = parser.parse('/svc/gateway.service.js', `
       module.exports = {
         name: "gateway",
@@ -175,7 +175,7 @@ describe('MoleculerParser', () => {
       }
     `)
     const kinds = result.references.map((reference) => [reference.fullName, reference.kind])
-    expect(kinds).toContainEqual(['orders.created', ReferenceKind.Broadcast])
+    expect(kinds).toContainEqual(['orders.created', ReferenceKind.Channel])
   })
 
   it('captures a single-quasi template literal channel name', () => {
@@ -190,7 +190,7 @@ describe('MoleculerParser', () => {
       }
     `)
     const kinds = result.references.map((reference) => [reference.fullName, reference.kind])
-    expect(kinds).toContainEqual(['orders.created', ReferenceKind.Broadcast])
+    expect(kinds).toContainEqual(['orders.created', ReferenceKind.Channel])
   })
 
   it('does not capture an interpolated template literal channel name', () => {

@@ -7,6 +7,7 @@ import { diagnosticsByFile } from './diagnostics.js'
 import { Handlers, uriToPath } from './handlers.js'
 import { ErrorCodes, isRecord, type Diagnostic, type DocumentSymbolParams, type Position, type ReferenceParams, type RequestMessage, type TextDocumentPositionParams } from './protocol.js'
 import { MessageFormatError, Transport } from './transport.js'
+import { VERSION } from '../version.js'
 
 enum ScanState {
   Pending = 'pending',
@@ -148,7 +149,7 @@ export class Server {
           ? { diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false } }
           : {}),
       },
-      serverInfo: { name: 'moleculer-lsp', version: '0.1.0' },
+      serverInfo: { name: 'moleculer-lsp', version: VERSION },
     })
   }
 

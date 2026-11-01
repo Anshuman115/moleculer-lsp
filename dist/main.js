@@ -7977,7 +7977,7 @@ function extractReferences(ast) {
         references.push({
           fullName: target,
           location: { fileId: 0, line: line(arg ?? node2), column: column(arg ?? node2) },
-          kind: method === "sendToChannel" ? "broadcast" /* Broadcast */ : "emit" /* Emit */
+          kind: method === "sendToChannel" ? "channel" /* Channel */ : "emit" /* Emit */
         });
       }
       return;
@@ -8242,7 +8242,7 @@ var Scanner = class {
       }
       return { fullName: `${record.namespace}.${selfMethod(reference.fullName)}` };
     }
-    if (reference.kind === "emit" /* Emit */ || reference.kind === "broadcast" /* Broadcast */) {
+    if (reference.kind === "emit" /* Emit */ || reference.kind === "broadcast" /* Broadcast */ || reference.kind === "channel" /* Channel */) {
       return this.resolveEvent(record, reference);
     }
     if (this.index.has(reference.fullName)) {
@@ -8254,7 +8254,7 @@ var Scanner = class {
     if (this.index.has(reference.fullName)) {
       return { fullName: reference.fullName };
     }
-    const targetKind = reference.kind === "broadcast" /* Broadcast */ ? "channel" /* Channel */ : "event" /* Event */;
+    const targetKind = reference.kind === "channel" /* Channel */ ? "channel" /* Channel */ : "event" /* Event */;
     const matches = this.index.allSymbols().filter(
       (symbol) => symbol.kind === targetKind && symbol.name === reference.fullName
     );
@@ -9045,6 +9045,62 @@ function contentLength(header) {
   throw new MessageFormatError("missing Content-Length header");
 }
 
+// package.json
+var package_default = {
+  name: "moleculer-lsp",
+  version: "0.1.0",
+  description: "Language server for Moleculer.js: go to definition, find references, document symbols and diagnostics across services, mixins and events",
+  keywords: [
+    "moleculer",
+    "moleculerjs",
+    "lsp",
+    "language-server",
+    "microservices",
+    "javascript"
+  ],
+  homepage: "https://github.com/Anshuman115/moleculer-lsp#readme",
+  bugs: {
+    url: "https://github.com/Anshuman115/moleculer-lsp/issues"
+  },
+  repository: {
+    type: "git",
+    url: "git+https://github.com/Anshuman115/moleculer-lsp.git"
+  },
+  license: "Apache-2.0",
+  author: "Anshuman Tripathy",
+  type: "module",
+  main: "dist/main.js",
+  bin: {
+    "moleculer-lsp": "dist/main.js"
+  },
+  files: [
+    "dist"
+  ],
+  engines: {
+    node: ">=18"
+  },
+  scripts: {
+    build: "tsc --noEmit && npm run bundle",
+    bundle: `esbuild src/main.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/main.js --banner:js="import{createRequire}from'node:module';const require=createRequire(import.meta.url);"`,
+    typecheck: "tsc --noEmit",
+    test: "vitest run src",
+    dev: "tsx src/main.ts",
+    prepublishOnly: "npm run build && npm test"
+  },
+  devDependencies: {
+    "@types/node": "^22.10.2",
+    acorn: "^8.16.0",
+    chokidar: "^4.0.3",
+    esbuild: "^0.28.1",
+    tsx: "^4.19.2",
+    typescript: "^5.7.2",
+    vitest: "^2.1.8"
+  }
+};
+
+// src/version.ts
+var VERSION = package_default.version;
+
 // src/lsp/server.ts
 var Server = class {
   index = new Index();
@@ -9173,7 +9229,7 @@ var Server = class {
         documentSymbolProvider: true,
         ...this.pullDiagnostics ? { diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false } } : {}
       },
-      serverInfo: { name: "moleculer-lsp", version: "0.1.0" }
+      serverInfo: { name: "moleculer-lsp", version: VERSION }
     });
   }
   startScan() {
@@ -9345,10 +9401,24 @@ function log(message) {
 }
 
 // src/main.ts
+var usage = `Usage: moleculer-lsp [options]
+
+Options:
+  --stdio          Start the language server over stdio (default)
+  --scan <dir>     Index a workspace and print a summary
+  --parse <file>   Print symbols and references for one file
+  --version        Print the version
+  --help           Print this help
+`;
 async function main(args) {
   const command = args.find((arg) => !arg.startsWith("--stdio"));
   if (command === "--version") {
-    process.stdout.write("moleculer-lsp 0.1.0\n");
+    process.stdout.write(`moleculer-lsp ${VERSION}
+`);
+    return;
+  }
+  if (command === "--help" || command === "-h") {
+    process.stdout.write(usage);
     return;
   }
   if (command === "--parse") {

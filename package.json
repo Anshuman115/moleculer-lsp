@@ -1,26 +1,48 @@
 {
   "name": "moleculer-lsp",
   "version": "0.1.0",
-  "description": "Language server for Moleculer.js: go to definition, references, diagnostics",
+  "description": "Language server for Moleculer.js: go to definition, find references, document symbols and diagnostics across services, mixins and events",
+  "keywords": [
+    "moleculer",
+    "moleculerjs",
+    "lsp",
+    "language-server",
+    "microservices",
+    "javascript"
+  ],
+  "homepage": "https://github.com/Anshuman115/moleculer-lsp#readme",
+  "bugs": {
+    "url": "https://github.com/Anshuman115/moleculer-lsp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Anshuman115/moleculer-lsp.git"
+  },
   "license": "Apache-2.0",
+  "author": "Anshuman Tripathy",
   "type": "module",
   "main": "dist/main.js",
   "bin": {
     "moleculer-lsp": "dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
     "build": "tsc --noEmit && npm run bundle",
     "bundle": "esbuild src/main.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/main.js --banner:js=\"import{createRequire}from'node:module';const require=createRequire(import.meta.url);\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run src",
-    "dev": "tsx src/main.ts"
-  },
-  "dependencies": {
-    "acorn": "^8.16.0",
-    "chokidar": "^4.0.3"
+    "dev": "tsx src/main.ts",
+    "prepublishOnly": "npm run build && npm test"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "acorn": "^8.16.0",
+    "chokidar": "^4.0.3",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
