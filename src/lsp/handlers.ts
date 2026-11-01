@@ -25,7 +25,7 @@ export class Handlers {
     if (target === undefined) {
       return null
     }
-    if (target.kind === CursorKind.ServiceName) {
+    if (target.kind === CursorKind.ServiceName && target.symbol.fileId === 0) {
       return this.serviceLocation(target.fullName)
     }
     return this.symbolLocation(target.symbol)
@@ -33,7 +33,7 @@ export class Handlers {
 
   references(params: ReferenceParams): Location[] {
     const target = this.resolveAt(params)
-    if (target === undefined || target.kind === CursorKind.ServiceName) {
+    if (target === undefined || (target.kind === CursorKind.ServiceName && target.symbol.fileId === 0)) {
       return []
     }
     const locations = this.referencesFor(target.symbol, uriToPath(params.textDocument.uri))

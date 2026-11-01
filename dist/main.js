@@ -8454,7 +8454,7 @@ function referenceDiagnostic(dropped) {
       severity: DiagnosticSeverity.Error,
       source,
       code: dropped.reason,
-      message: `"${dropped.fullName}" matches multiple services; target is ambiguous`
+      message: `"${displayName(dropped.fullName)}" matches multiple services; target is ambiguous`
     };
   }
   if (dropped.reason === "event-no-listener" /* EventNoListener */) {
@@ -8472,7 +8472,7 @@ function referenceDiagnostic(dropped) {
       severity: DiagnosticSeverity.Hint,
       source,
       code: dropped.reason,
-      message: `"${dropped.fullName}" is not defined in this workspace`
+      message: `"${displayName(dropped.fullName)}" is not defined in this workspace`
     };
   }
   return void 0;
@@ -8510,6 +8510,9 @@ function collisionDiagnostics(index) {
     }
   }
   return results;
+}
+function displayName(fullName) {
+  return fullName.startsWith(SELF_PREFIX) ? `this.${fullName.slice(SELF_PREFIX.length)}` : fullName;
 }
 function pointRange(line2, column2, length) {
   return {
@@ -8740,14 +8743,14 @@ var Handlers = class {
     if (target === void 0) {
       return null;
     }
-    if (target.kind === "serviceName" /* ServiceName */) {
+    if (target.kind === "serviceName" /* ServiceName */ && target.symbol.fileId === 0) {
       return this.serviceLocation(target.fullName);
     }
     return this.symbolLocation(target.symbol);
   }
   references(params) {
     const target = this.resolveAt(params);
-    if (target === void 0 || target.kind === "serviceName" /* ServiceName */) {
+    if (target === void 0 || target.kind === "serviceName" /* ServiceName */ && target.symbol.fileId === 0) {
       return [];
     }
     const locations = this.referencesFor(target.symbol, uriToPath(params.textDocument.uri));
@@ -9115,6 +9118,9 @@ var Server = class {
       case "textDocument/documentSymbol":
         this.documentSymbolRequest(message);
         return;
+      case "textDocument/diagnostic":
+        this.diagnosticRequest(message);
+        return;
       default:
         if (message.id !== void 0) {
           this.transport.writeError(message.id, ErrorCodes.MethodNotFound, `method not found: ${message.method}`);
@@ -9203,6 +9209,20 @@ var Server = class {
       return;
     }
     this.transport.writeResult(message.id, this.handlers.documentSymbols(documentSymbolParams(message.params)));
+  }
+  diagnosticRequest(message) {
+    if (this.scanState === "pending" /* Pending */) {
+      this.queued.push(message);
+      return;
+    }
+    if (this.scanState === "failed" /* Failed */) {
+      this.transport.writeResult(message.id, { kind: "full", items: [] });
+      return;
+    }
+    const document = textDocument(message.params);
+    const fileId = document === void 0 ? 0 : this.index.fileId(uriToPath(document.uri));
+    const items = diagnosticsByFile(this.index, this.scanner).get(fileId) ?? [];
+    this.transport.writeResult(message.id, { kind: "full", items });
   }
   didOpen(params) {
     const document = textDocument(params);

@@ -106,6 +106,9 @@ export class Server {
       case 'textDocument/documentSymbol':
         this.documentSymbolRequest(message)
         return
+      case 'textDocument/diagnostic':
+        this.diagnosticRequest(message)
+        return
       default:
         if (message.id !== undefined) {
           this.transport.writeError(message.id, ErrorCodes.MethodNotFound, `method not found: ${message.method}`)
@@ -200,6 +203,21 @@ export class Server {
       return
     }
     this.transport.writeResult(message.id, this.handlers.documentSymbols(documentSymbolParams(message.params)))
+  }
+
+  private diagnosticRequest(message: RequestMessage): void {
+    if (this.scanState === ScanState.Pending) {
+      this.queued.push(message)
+      return
+    }
+    if (this.scanState === ScanState.Failed) {
+      this.transport.writeResult(message.id, { kind: 'full', items: [] as Diagnostic[] })
+      return
+    }
+    const document = textDocument(message.params)
+    const fileId = document === undefined ? 0 : this.index.fileId(uriToPath(document.uri))
+    const items = diagnosticsByFile(this.index, this.scanner).get(fileId) ?? []
+    this.transport.writeResult(message.id, { kind: 'full', items })
   }
 
   private didOpen(params: unknown): void {

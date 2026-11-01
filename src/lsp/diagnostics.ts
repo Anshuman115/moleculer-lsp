@@ -1,4 +1,5 @@
 import { Index } from '../index/Index.js'
+import { SELF_PREFIX } from '../parser/moleculerParser.js'
 import { Scanner } from '../scanner/scanner.js'
 import { DropReason, SymbolKind, type DroppedReference, type MixinFailure } from '../types.js'
 import { DiagnosticSeverity, type Diagnostic } from './protocol.js'
@@ -53,7 +54,7 @@ function referenceDiagnostic(dropped: DroppedReference): Diagnostic | undefined 
       severity: DiagnosticSeverity.Error,
       source,
       code: dropped.reason,
-      message: `"${dropped.fullName}" matches multiple services; target is ambiguous`,
+      message: `"${displayName(dropped.fullName)}" matches multiple services; target is ambiguous`,
     }
   }
   if (dropped.reason === DropReason.EventNoListener) {
@@ -71,7 +72,7 @@ function referenceDiagnostic(dropped: DroppedReference): Diagnostic | undefined 
       severity: DiagnosticSeverity.Hint,
       source,
       code: dropped.reason,
-      message: `"${dropped.fullName}" is not defined in this workspace`,
+      message: `"${displayName(dropped.fullName)}" is not defined in this workspace`,
     }
   }
   return undefined
@@ -120,6 +121,10 @@ function collisionDiagnostics(index: Index): Array<[number, Diagnostic]> {
     }
   }
   return results
+}
+
+function displayName(fullName: string): string {
+  return fullName.startsWith(SELF_PREFIX) ? `this.${fullName.slice(SELF_PREFIX.length)}` : fullName
 }
 
 function pointRange(line: number, column: number, length: number): Diagnostic['range'] {
