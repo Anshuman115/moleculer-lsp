@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import fs from 'node:fs'
 import { Index } from './index/Index.js'
 import { MoleculerParser } from './parser/moleculerParser.js'
