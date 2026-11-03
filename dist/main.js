@@ -9331,7 +9331,7 @@ function shipsWithoutTsserver(tscPath) {
 // package.json
 var package_default = {
   name: "moleculer-lsp",
-  version: "0.1.1",
+  version: "0.2.0",
   description: "Language server for Moleculer.js: go to definition, find references, document symbols and diagnostics across services, mixins and events",
   keywords: [
     "moleculer",
