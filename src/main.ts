@@ -9,15 +9,18 @@ import { VERSION } from './version.js'
 const usage = `Usage: moleculer-lsp [options]
 
 Options:
-  --stdio          Start the language server over stdio (default)
-  --scan <dir>     Index a workspace and print a summary
-  --parse <file>   Print symbols and references for one file
-  --version        Print the version
-  --help           Print this help
+  --stdio                  Start the language server over stdio (default)
+  --typescript-fallback    Send definition, references and symbol requests the index cannot answer to TypeScript
+  --scan <dir>             Index a workspace and print a summary
+  --parse <file>           Print symbols and references for one file
+  --version                Print the version
+  --help                   Print this help
 `
 
+const typescriptFallbackFlag = '--typescript-fallback'
+
 async function main(args: string[]): Promise<void> {
-  const command = args.find((arg) => !arg.startsWith('--stdio'))
+  const command = args.find((arg) => arg !== typescriptFallbackFlag && !arg.startsWith('--stdio'))
 
   if (command === '--version') {
     process.stdout.write(`moleculer-lsp ${VERSION}\n`)
@@ -36,7 +39,7 @@ async function main(args: string[]): Promise<void> {
     return
   }
 
-  await new Server(process.stdin, process.stdout).run()
+  await new Server(process.stdin, process.stdout, { typescriptFallback: args.includes(typescriptFallbackFlag) }).run()
 }
 
 function parseFile(filePath: string | undefined): void {

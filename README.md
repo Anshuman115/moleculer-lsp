@@ -45,14 +45,17 @@ The server speaks LSP over stdin and stdout and writes logs to stderr.
 Usage: moleculer-lsp [options]
 
 Options:
-  --stdio          Start the language server over stdio (default)
-  --scan <dir>     Index a workspace and print a summary
-  --parse <file>   Print symbols and references for one file
-  --version        Print the version
-  --help           Print this help
+  --stdio                  Start the language server over stdio (default)
+  --typescript-fallback    Send definition, references and symbol requests the index cannot answer to TypeScript
+  --scan <dir>             Index a workspace and print a summary
+  --parse <file>           Print symbols and references for one file
+  --version                Print the version
+  --help                   Print this help
 ```
 
 `--scan` prints file, symbol and reference counts, and unresolved references grouped by reason.
+
+`--typescript-fallback` is for clients that send each request to one server only. When the Moleculer index has no result, the request goes to `tsc --lsp` (TypeScript 7 and later) or to `typescript-language-server`, found in the project's `node_modules/.bin` or on `PATH`. Do not use it in editors that already run a TypeScript server next to `moleculer-lsp`, because they merge results from both servers.
 
 ## Editor setup
 
@@ -95,7 +98,7 @@ omp does not detect `moleculer-lsp` automatically. Register it in `~/.omp/agent/
   "servers": {
     "moleculer": {
       "command": "moleculer-lsp",
-      "args": ["--stdio"],
+      "args": ["--stdio", "--typescript-fallback"],
       "fileTypes": [".js"],
       "rootMarkers": ["moleculer.config.js"]
     }
@@ -116,7 +119,7 @@ omp sends go-to-definition, references and rename to the first server that accep
 }
 ```
 
-In that project, go-to-definition on plain JavaScript identifiers then returns no result. Diagnostics from both servers are still shown.
+With `--typescript-fallback`, definition, references and document symbol requests that the Moleculer index cannot answer, such as definitions of `require`-imported modules and classes, are answered by TypeScript. This starts a second TypeScript server next to the one omp runs. Rename is not available in this setup, because `moleculer-lsp` does not implement it. Diagnostics from both servers are still shown.
 
 Restart omp after you install or update `moleculer-lsp`.
 

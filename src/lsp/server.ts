@@ -7,7 +7,13 @@ import { diagnosticsByFile } from './diagnostics.js'
 import { Handlers, uriToPath } from './handlers.js'
 import { ErrorCodes, isRecord, type Diagnostic, type DocumentSymbolParams, type Position, type ReferenceParams, type RequestMessage, type TextDocumentPositionParams } from './protocol.js'
 import { MessageFormatError, Transport } from './transport.js'
+import { resolveTypeScriptCommand, TypeScriptBridge, type TypeScriptCommand } from './typescript-bridge.js'
 import { VERSION } from '../version.js'
+import { log } from '../log.js'
+
+export interface ServerOptions {
+  typescriptFallback?: boolean | TypeScriptCommand
+}
 
 enum ScanState {
   Pending = 'pending',
@@ -29,8 +35,9 @@ export class Server {
   private pullDiagnostics = false
   private refreshSupport = false
   private nextServerRequestId = 1
+  private bridge: TypeScriptBridge | undefined
 
-  constructor(readable: Readable, writable: Writable) {
+  constructor(readable: Readable, writable: Writable, private readonly options: ServerOptions = {}) {
     this.transport = new Transport(readable, writable)
     this.watcher = new Watcher(() => this.rescan())
   }
@@ -50,6 +57,7 @@ export class Server {
       }
       if (body === undefined) {
         this.watcher.close()
+        this.bridge?.stop()
         return
       }
       let message: RequestMessage
@@ -88,10 +96,12 @@ export class Server {
         return
       case 'shutdown':
         this.watcher.close()
+        this.bridge?.stop()
         this.transport.writeResult(message.id, null)
         return
       case 'exit':
         this.watcher.close()
+        this.bridge?.stop()
         process.exit(0)
       case 'textDocument/didOpen':
         this.didOpen(message.params)
@@ -139,6 +149,7 @@ export class Server {
     const workspaceDiagnostics = isRecord(workspace.diagnostics) ? workspace.diagnostics : {}
     this.pullDiagnostics = isRecord(textDocument.diagnostic)
     this.refreshSupport = workspaceDiagnostics.refreshSupport === true
+    this.bridge = this.createBridge()
     this.transport.writeResult(message.id, {
       capabilities: {
         textDocumentSync: { openClose: true, change: 1, save: true },
@@ -200,11 +211,36 @@ export class Server {
       this.transport.writeError(message.id, ErrorCodes.ServerNotInitialized, `index unavailable: ${this.scanError}`)
       return
     }
-    if (message.method === 'textDocument/definition') {
-      this.transport.writeResult(message.id, this.handlers.definition(positionParams(message.params)))
+    const result = message.method === 'textDocument/definition'
+      ? this.handlers.definition(positionParams(message.params))
+      : this.handlers.references(referenceParams(message.params))
+    this.respond(message, result)
+  }
+
+  private respond(message: RequestMessage, result: unknown): void {
+    const uri = textDocument(message.params)?.uri
+    if (this.bridge === undefined || uri === undefined || !isEmpty(result)) {
+      this.transport.writeResult(message.id, result)
       return
     }
-    this.transport.writeResult(message.id, this.handlers.references(referenceParams(message.params)))
+    void this.bridge.request(message.method, message.params, uri).then(
+      (fallback) => this.transport.writeResult(message.id, isEmpty(fallback) ? result : fallback),
+      () => this.transport.writeResult(message.id, result),
+    )
+  }
+
+  private createBridge(): TypeScriptBridge | undefined {
+    const setting = this.options.typescriptFallback
+    if (setting === undefined || setting === false) {
+      return undefined
+    }
+    const command = setting === true ? resolveTypeScriptCommand(this.rootPath) : setting
+    if (command === undefined) {
+      log('typescript fallback disabled: no tsc with --lsp or typescript-language-server found')
+      return undefined
+    }
+    log(`typescript fallback: ${command.command} ${command.args.join(' ')}`)
+    return new TypeScriptBridge(command, this.rootPath)
   }
 
   private documentSymbolRequest(message: RequestMessage): void {
@@ -216,7 +252,7 @@ export class Server {
       this.transport.writeError(message.id, ErrorCodes.ServerNotInitialized, `index unavailable: ${this.scanError}`)
       return
     }
-    this.transport.writeResult(message.id, this.handlers.documentSymbols(documentSymbolParams(message.params)))
+    this.respond(message, this.handlers.documentSymbols(documentSymbolParams(message.params)))
   }
 
   private diagnosticRequest(message: RequestMessage): void {
@@ -242,6 +278,7 @@ export class Server {
     const document = textDocument(params)
     if (document !== undefined && typeof document.text === 'string') {
       this.handlers.openDocument(document.uri, document.text)
+      this.bridge?.track(document.uri, document.text)
     }
   }
 
@@ -252,6 +289,7 @@ export class Server {
     const latest = changes[changes.length - 1]
     if (document !== undefined && isRecord(latest) && typeof latest.text === 'string') {
       this.handlers.openDocument(document.uri, latest.text)
+      this.bridge?.track(document.uri, latest.text)
     }
   }
 
@@ -263,6 +301,7 @@ export class Server {
     const document = textDocument(params)
     if (document !== undefined) {
       this.handlers.closeDocument(document.uri)
+      this.bridge?.forget(document.uri)
     }
   }
 
@@ -328,12 +367,12 @@ function documentSymbolParams(params: unknown): DocumentSymbolParams {
   return { textDocument: { uri: document?.uri ?? '' } }
 }
 
-function pathUri(filePath: string): string {
-  return new URL(`file://${filePath}`).toString()
+function isEmpty(result: unknown): boolean {
+  return result === null || result === undefined || (Array.isArray(result) && result.length === 0)
 }
 
-export function log(message: string): void {
-  process.stderr.write(`[moleculer-lsp] ${message}\n`)
+function pathUri(filePath: string): string {
+  return new URL(`file://${filePath}`).toString()
 }
 
 export { uriToPath }
