@@ -1,4 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { createRequire as createModuleRequire } from 'node:module'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -19,13 +20,30 @@ interface Pending {
 const requestTimeoutMs = 15000
 const maxConsecutiveTimeouts = 2
 
-export function resolveTypeScriptCommand(rootPath: string, searchPath = process.env.PATH ?? ''): TypeScriptCommand | undefined {
+export function resolveTypeScriptCommand(
+  rootPath: string,
+  searchPath = process.env.PATH ?? '',
+  bundled: () => TypeScriptCommand | undefined = bundledTypeScript,
+): TypeScriptCommand | undefined {
   const tsc = findExecutable('tsc', rootPath, searchPath)
   if (tsc !== undefined && speaksLsp(tsc)) {
     return { command: tsc, args: ['--lsp', '--stdio'] }
   }
   const server = findExecutable('typescript-language-server', rootPath, searchPath)
-  return server === undefined ? undefined : { command: server, args: ['--stdio'] }
+  return server === undefined ? bundled() : { command: server, args: ['--stdio'] }
+}
+
+function bundledTypeScript(): TypeScriptCommand | undefined {
+  try {
+    const manifestPath = createModuleRequire(import.meta.url).resolve('typescript/package.json')
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { version?: unknown }
+    if (typeof manifest.version !== 'string' || Number(manifest.version.split('.')[0]) < 7) {
+      return undefined
+    }
+    return { command: process.execPath, args: [path.join(path.dirname(manifestPath), 'bin', 'tsc'), '--lsp', '--stdio'] }
+  } catch {
+    return undefined
+  }
 }
 
 export class TypeScriptBridge {
@@ -37,10 +55,18 @@ export class TypeScriptBridge {
   private readonly versions = new Map<string, number>()
   private nextId = 1
   private consecutiveTimeouts = 0
+  private pullDiagnostics = false
 
-  constructor(private readonly command: TypeScriptCommand, private readonly rootPath: string) {}
+  constructor(
+    private readonly command: TypeScriptCommand,
+    private readonly rootPath: string,
+    private readonly onDiagnostics?: (uri: string, diagnostics: unknown[]) => void,
+  ) {}
 
   track(uri: string, text: string): void {
+    if (this.texts.get(uri) === text) {
+      return
+    }
     this.texts.set(uri, text)
     const version = this.versions.get(uri)
     if (version === undefined || this.transport === undefined) {
@@ -51,6 +77,7 @@ export class TypeScriptBridge {
       textDocument: { uri, version: version + 1 },
       contentChanges: [{ text }],
     })
+    this.pullFor(uri)
   }
 
   forget(uri: string): void {
@@ -58,15 +85,26 @@ export class TypeScriptBridge {
     this.close(uri)
   }
 
-  async request(method: string, params: unknown, uri: string): Promise<unknown> {
+  async show(uri: string): Promise<void> {
+    if (await this.start()) {
+      this.open(uri)
+      this.pullFor(uri)
+    }
+  }
+
+  async request(method: string, params: unknown, uri: string | undefined): Promise<unknown> {
     if (!(await this.start())) {
       return null
     }
-    const temporary = !this.texts.has(uri)
-    this.open(uri)
+    const target = uri ?? this.texts.keys().next().value
+    if (target === undefined) {
+      return this.send(method, withoutProgressTokens(params))
+    }
+    const temporary = !this.texts.has(target)
+    this.open(target)
     const result = await this.send(method, withoutProgressTokens(params))
-    if (temporary && !this.texts.has(uri)) {
-      this.close(uri)
+    if (temporary && !this.texts.has(target)) {
+      this.close(target)
     }
     return result
   }
@@ -107,14 +145,27 @@ export class TypeScriptBridge {
     const result = await this.send('initialize', {
       processId: process.pid,
       rootUri: pathToFileURL(this.rootPath).toString(),
-      capabilities: {},
+      capabilities: { textDocument: { publishDiagnostics: {}, diagnostic: {} } },
     })
     if (result === null || this.transport === undefined) {
       this.shutdown('initialize failed')
       return false
     }
+    this.pullDiagnostics = isRecord(result) && isRecord(result.capabilities) && result.capabilities.diagnosticProvider !== undefined
     this.transport.writeNotification('initialized', {})
     return true
+  }
+
+  private pullFor(uri: string): void {
+    if (this.onDiagnostics === undefined || !this.pullDiagnostics) {
+      return
+    }
+    const onDiagnostics = this.onDiagnostics
+    void this.send('textDocument/diagnostic', { textDocument: { uri } }).then((report) => {
+      if (isRecord(report) && Array.isArray(report.items)) {
+        onDiagnostics(uri, report.items)
+      }
+    })
   }
 
   private shutdown(reason: string | undefined): void {
@@ -188,6 +239,8 @@ export class TypeScriptBridge {
     if (typeof message.method === 'string') {
       if (message.id !== undefined) {
         transport.writeResult(message.id, replyFor(message.method, message.params))
+      } else if (message.method === 'textDocument/publishDiagnostics') {
+        this.forwardDiagnostics(message.params)
       }
       return
     }
@@ -202,6 +255,12 @@ export class TypeScriptBridge {
     this.consecutiveTimeouts = 0
     clearTimeout(pending.timer)
     pending.resolve(message.error === undefined ? message.result ?? null : null)
+  }
+
+  private forwardDiagnostics(params: unknown): void {
+    if (this.onDiagnostics !== undefined && isRecord(params) && typeof params.uri === 'string' && Array.isArray(params.diagnostics)) {
+      this.onDiagnostics(params.uri, params.diagnostics)
+    }
   }
 
   private open(uri: string): void {

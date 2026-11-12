@@ -26,7 +26,8 @@
     "moleculer-lsp": "dist/main.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=18"
@@ -37,7 +38,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run src",
     "dev": "tsx src/main.ts",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm test",
+    "bench": "node scripts/benchmark.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
@@ -45,7 +47,9 @@
     "chokidar": "^4.0.3",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
     "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "typescript": "^7.0.2"
   }
 }

@@ -9,6 +9,7 @@ let root: string
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'mol-lsp-server-'))
+  fs.writeFileSync(path.join(root, 'moleculer.config.js'), 'module.exports = {}')
 })
 
 afterEach(() => {
@@ -165,6 +166,72 @@ const ghostFixture = [
   '}',
 ].join('\n')
 
+describe('Server root marker', () => {
+  it('indexes nothing and reports no diagnostics without moleculer.config.js', async () => {
+    fs.rmSync(path.join(root, 'moleculer.config.js'))
+    const filePath = path.join(root, 'caller.service.js')
+    fs.writeFileSync(filePath, ghostFixture)
+
+    const client = new Client()
+    try {
+      await initialize(client, pullCapabilities)
+
+      const report = await client.request('textDocument/diagnostic', {
+        textDocument: { uri: `file://${filePath}` },
+      }) as { items: unknown[] }
+      const definition = await client.request('textDocument/definition', {
+        textDocument: { uri: `file://${filePath}` },
+        position: positionOf(ghostFixture, 'ghost.action'),
+      })
+
+      expect(report.items).toEqual([])
+      expect(definition ?? null).toBeNull()
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('finds moleculer.config.js in a parent of the workspace root', async () => {
+    const nested = path.join(root, 'services')
+    fs.mkdirSync(nested)
+    const filePath = path.join(nested, 'caller.service.js')
+    fs.writeFileSync(filePath, ghostFixture)
+
+    const client = new Client()
+    try {
+      await client.request('initialize', { processId: process.pid, rootUri: `file://${nested}`, capabilities: pullCapabilities })
+      client.notify('initialized', {})
+
+      const report = await client.request('textDocument/diagnostic', {
+        textDocument: { uri: `file://${filePath}` },
+      }) as { items: unknown[] }
+
+      expect(report.items.length).toBeGreaterThan(0)
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('indexes a workspace whose package.json depends on moleculer', async () => {
+    fs.rmSync(path.join(root, 'moleculer.config.js'))
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ dependencies: { moleculer: '^0.14.0' } }))
+    const filePath = path.join(root, 'caller.service.js')
+    fs.writeFileSync(filePath, ghostFixture)
+
+    const client = new Client()
+    try {
+      await initialize(client, pullCapabilities)
+      const report = await client.request('textDocument/diagnostic', {
+        textDocument: { uri: `file://${filePath}` },
+      }) as { items: unknown[] }
+
+      expect(report.items.length).toBeGreaterThan(0)
+    } finally {
+      client.stop()
+    }
+  })
+})
+
 describe('Server pull diagnostics', () => {
   it('advertises pull diagnostics when the client supports them', async () => {
     const client = new Client()
@@ -206,23 +273,43 @@ describe('Server pull diagnostics', () => {
     }
   })
 
-  it('keeps pushing diagnostics for clients without pull support', async () => {
-    const filePath = path.join(root, 'caller.service.js')
-    fs.writeFileSync(filePath, ghostFixture)
+  it('pushes diagnostics only for files the client opened', async () => {
+    const openedPath = path.join(root, 'caller.service.js')
+    const closedPath = path.join(root, 'other.service.js')
+    fs.writeFileSync(openedPath, ghostFixture)
+    fs.writeFileSync(closedPath, ghostFixture.replace('"caller"', '"other"'))
 
     const client = new Client()
     try {
       const result = await initialize(client, {})
       expect(result.capabilities.diagnosticProvider).toBeUndefined()
 
-      const params = await client.waitForNotification('textDocument/publishDiagnostics') as {
-        uri: string
-        diagnostics: Array<{ message: string }>
-      }
-      expect(params.uri.endsWith('caller.service.js')).toBe(true)
-      expect(params.diagnostics.map((item) => item.message)).toContainEqual(
-        expect.stringContaining('"ghost.action"'),
-      )
+      client.notify('textDocument/didOpen', { textDocument: { uri: `file://${openedPath}`, languageId: 'javascript', version: 1, text: ghostFixture } })
+      const messages = await waitForMessages(client, `file://${openedPath}`, '"ghost.action" is not defined in this workspace')
+
+      expect(messages.length).toBeGreaterThan(0)
+      expect(client.notifications.some((entry) => (entry.params as { uri?: string }).uri === `file://${closedPath}`)).toBe(false)
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('clears pushed diagnostics when the client closes the file', async () => {
+    const filePath = path.join(root, 'caller.service.js')
+    fs.writeFileSync(filePath, ghostFixture)
+    const uri = `file://${filePath}`
+
+    const client = new Client()
+    try {
+      await initialize(client, {})
+      client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'javascript', version: 1, text: ghostFixture } })
+      await waitForMessages(client, uri, '"ghost.action" is not defined in this workspace')
+
+      client.notify('textDocument/didClose', { textDocument: { uri } })
+      await expect.poll(() => {
+        const published = client.notifications.filter((entry) => (entry.params as { uri?: string }).uri === uri)
+        return (published.at(-1)?.params as { diagnostics: unknown[] }).diagnostics
+      }).toEqual([])
     } finally {
       client.stop()
     }
@@ -351,6 +438,8 @@ const handle = (message) => {
   if (message.method === 'textDocument/didOpen' || message.method === 'textDocument/didChange') {
     const document = message.params.textDocument
     documents.set(document.uri, document.text ?? message.params.contentChanges[0].text)
+    const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }
+    send({ jsonrpc: '2.0', method: 'textDocument/publishDiagnostics', params: { uri: document.uri, diagnostics: [{ range, severity: 1, source: 'typescript', message: 'stub type error' }] } })
     return
   }
   if (message.method === 'textDocument/didClose') {
@@ -378,6 +467,9 @@ const handle = (message) => {
   if (message.method === 'textDocument/documentSymbol') {
     const location = locationFor(uri)
     return send({ jsonrpc: '2.0', id: message.id, result: location === null ? [] : [{ name: 'stubSymbol', kind: 12, location }] })
+  }
+  if (message.method === 'textDocument/hover') {
+    return send({ jsonrpc: '2.0', id: message.id, result: locationFor(uri) === null ? null : { contents: 'stub hover' } })
   }
   send({ jsonrpc: '2.0', id: message.id, result: null })
 }
@@ -415,6 +507,22 @@ async function waitForExit(pid: number): Promise<boolean> {
     await new Promise((resolve) => setTimeout(resolve, 20))
   }
   return !processAlive(pid)
+}
+
+async function waitForMessages(client: Client, uri: string, needle: string): Promise<string[]> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const published = client.notifications
+      .filter((entry) => entry.method === 'textDocument/publishDiagnostics')
+      .map((entry) => entry.params as { uri: string; diagnostics: Array<{ message: string }> })
+      .filter((params) => params.uri === uri)
+      .map((params) => params.diagnostics.map((diagnostic) => diagnostic.message))
+    const latest = published[published.length - 1] ?? []
+    if (latest.includes(needle)) {
+      return latest
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error(`no diagnostics containing ${needle} for ${uri}`)
 }
 
 describe('Server TypeScript fallback', () => {
@@ -507,6 +615,51 @@ describe('Server TypeScript fallback', () => {
 
       expect(definition?.uri.endsWith('mongo.service.js')).toBe(true)
       expect(definition?.range.start.line).toBe(3)
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('answers plain JS requests through TypeScript in a workspace without Moleculer', async () => {
+    fs.rmSync(path.join(root, 'moleculer.config.js'))
+    const { uri } = writePlain()
+    const client = new Client(stub())
+    try {
+      await initialize(client, pullCapabilities)
+      expect(await definitionLine(client, uri)).toBe(2)
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('passes hover through to TypeScript', async () => {
+    const { uri } = writePlain()
+    const client = new Client(stub())
+    try {
+      const result = await initialize(client, pullCapabilities)
+      const hover = await client.request('textDocument/hover', {
+        textDocument: { uri },
+        position: positionOf(plainSource, 'compute'),
+      }) as { contents: string } | null
+
+      expect(result.capabilities.hoverProvider).toBe(true)
+      expect(hover?.contents).toBe('stub hover')
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('publishes TypeScript and Moleculer diagnostics together for an open file', async () => {
+    const filePath = path.join(root, 'caller.service.js')
+    fs.writeFileSync(filePath, ghostFixture)
+    const uri = `file://${filePath}`
+    const client = new Client({ ...stub(), typescriptDiagnostics: true })
+    try {
+      await initialize(client, {})
+      client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'javascript', version: 1, text: ghostFixture } })
+
+      const messages = await waitForMessages(client, uri, 'stub type error')
+      expect(messages).toContainEqual(expect.stringContaining('"ghost.action"'))
     } finally {
       client.stop()
     }

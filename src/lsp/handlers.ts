@@ -37,6 +37,9 @@ export class Handlers {
       return []
     }
     const locations = this.referencesFor(target.symbol, uriToPath(params.textDocument.uri))
+    if (locations.length === 0) {
+      return []
+    }
     const result = locations.map((location) => this.toLocation(location))
     if (params.context?.includeDeclaration === true) {
       result.unshift(this.symbolLocation(target.symbol))
@@ -121,7 +124,8 @@ export class Handlers {
       return { kind: context.kind, fullName: context.fullName, symbol: placeholder(context.fullName) }
     }
 
-    const symbol = this.findByShortName(shortName(context.fullName), fileId, namespace)
+    const requireRelated = context.chained === true || context.kind === CursorKind.DefinitionSite
+    const symbol = this.findByShortName(shortName(context.fullName), fileId, namespace, requireRelated)
     return symbol === undefined ? undefined : { kind: context.kind, fullName: context.fullName, symbol }
   }
 
@@ -129,16 +133,16 @@ export class Handlers {
     const matches = this.index.allSymbols().filter(
       (symbol) => symbol.kind === SymbolKind.Event && symbol.name === name,
     )
-    if (matches.length <= 1) {
+    if (hasSingleOrigin(matches)) {
       return matches[0]
     }
     const related = matches.filter((symbol) => this.scanner.isRelated(fileId, namespace, symbol))
-    return related.length === 1 ? related[0] : undefined
+    return hasSingleOrigin(related) ? related[0] : undefined
   }
 
-  private findByShortName(name: string, fileId: number, namespace: string): Symbol | undefined {
+  private findByShortName(name: string, fileId: number, namespace: string, requireRelated: boolean): Symbol | undefined {
     const matches = this.index.allSymbols().filter((symbol) => symbol.name === name)
-    if (matches.length <= 1) {
+    if (matches.length <= 1 && !requireRelated) {
       return matches[0]
     }
     const related = matches.filter((symbol) => this.scanner.isRelated(fileId, namespace, symbol))
@@ -177,7 +181,7 @@ export class Handlers {
   }
 
   private symbolLocation(symbol: Symbol): Location {
-    const fileId = symbol.sourceFileId === 0 ? symbol.fileId : symbol.sourceFileId
+    const fileId = originFileId(symbol)
     return {
       uri: pathToUri(this.index.filePath(fileId)),
       range: {
@@ -232,6 +236,14 @@ function range(line: number, character: number, source: string): { start: Positi
 function shortName(fullName: string): string {
   const dot = fullName.lastIndexOf('.')
   return dot < 0 ? fullName : fullName.slice(dot + 1)
+}
+
+function hasSingleOrigin(symbols: Symbol[]): boolean {
+  return symbols.length > 0 && new Set(symbols.map(originFileId)).size === 1
+}
+
+function originFileId(symbol: Symbol): number {
+  return symbol.sourceFileId === 0 ? symbol.fileId : symbol.sourceFileId
 }
 
 function dedupe(locations: IndexLocation[]): IndexLocation[] {

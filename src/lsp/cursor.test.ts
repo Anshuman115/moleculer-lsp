@@ -37,6 +37,10 @@ describe('detect', () => {
     expect(context.fullName).toBe('users.hashPassword')
   })
 
+  it('leaves the this keyword itself to TypeScript', () => {
+    expect(at('return this.hashPassword(value)', 'this').kind).toBe(CursorKind.Unknown)
+  })
+
   it('marks a chained this-call as chained', () => {
     const context = at('return this.client.connect()', 'connect')
     expect(context.chained).toBe(true)
@@ -48,6 +52,16 @@ describe('detect', () => {
 
   it('ignores known globals on a local call', () => {
     expect(at('console.log("x")', 'log').kind).toBe(CursorKind.Unknown)
+  })
+
+  it('leaves method calls on plain objects to TypeScript', () => {
+    expect(at('Passwordless.init({ contactMethod })', 'init').kind).toBe(CursorKind.Unknown)
+  })
+
+  it('does not treat a call assigned to a this-property as a this-call', () => {
+    const source = 'this.client = HttpClientFactory.createClientV2(config)'
+    expect(at(source, 'HttpClientFactory').kind).toBe(CursorKind.Unknown)
+    expect(at(source, 'createClientV2').kind).toBe(CursorKind.Unknown)
   })
 
   it('detects a definition site key', () => {

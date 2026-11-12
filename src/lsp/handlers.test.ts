@@ -67,3 +67,74 @@ describe('Handlers documentSymbols', () => {
     expect(handlers.documentSymbols({ textDocument: { uri: `file://${filePath}` } })).toEqual([])
   })
 })
+
+describe('Handlers definition', () => {
+  it('resolves an emit inside a mixin shared by several services to the mixin listener', () => {
+    const mixinPath = path.join(root, 'booking.mixin.js')
+    fs.writeFileSync(mixinPath, [
+      'module.exports = {',
+      '  actions: { create(ctx) { ctx.emit("kyc.reconcile", {}) } },',
+      '  events: { "kyc.reconcile"(ctx) {} },',
+      '}',
+    ].join('\n'))
+    for (const name of ['api', 'dashboard']) {
+      fs.writeFileSync(path.join(root, `${name}.service.js`), `const Booking = require("./booking.mixin"); module.exports = { name: "${name}", mixins: [Booking] }`)
+    }
+    const index = new Index()
+    const scanner = new Scanner(index)
+    scanner.scan(root)
+    const handlers = new Handlers(index, scanner)
+    const uri = `file://${mixinPath}`
+
+    expect(handlers.definition({ textDocument: { uri }, position: { line: 1, character: 40 } })).toEqual({
+      uri,
+      range: { start: { line: 2, character: 12 }, end: { line: 2, character: 25 } },
+    })
+  })
+
+  it('does not guess a chained this-call target from an unrelated service', () => {
+    fs.writeFileSync(path.join(root, 'queue.service.js'), 'module.exports = { name: "queue", methods: { connect() {} } }')
+    const callerPath = path.join(root, 'mail.service.js')
+    fs.writeFileSync(callerPath, [
+      'module.exports = {',
+      '  name: "mail",',
+      '  actions: { send() { return this.client.connect() } },',
+      '}',
+    ].join('\n'))
+    const index = new Index()
+    const scanner = new Scanner(index)
+    scanner.scan(root)
+    const handlers = new Handlers(index, scanner)
+
+    expect(handlers.definition({ textDocument: { uri: `file://${callerPath}` }, position: { line: 2, character: 44 } })).toBeNull()
+  })
+
+  it('does not treat a plain function call statement as a definition site of an unrelated method', () => {
+    fs.writeFileSync(path.join(root, 'queue.service.js'), 'module.exports = { name: "queue", methods: { init() {} } }')
+    const callerPath = path.join(root, 'bootstrap.js')
+    fs.writeFileSync(callerPath, 'const init = require("./init")\ninit(config)\n')
+    const index = new Index()
+    const scanner = new Scanner(index)
+    scanner.scan(root)
+    const handlers = new Handlers(index, scanner)
+
+    expect(handlers.definition({ textDocument: { uri: `file://${callerPath}` }, position: { line: 1, character: 1 } })).toBeNull()
+  })
+})
+
+describe('Handlers references', () => {
+  it('returns nothing when no indexed reference exists, even when the declaration is requested', () => {
+    const filePath = path.join(root, 'mail.service.js')
+    fs.writeFileSync(filePath, 'module.exports = {\n  name: "mail",\n  methods: {\n    unused() {},\n  },\n}\n')
+    const index = new Index()
+    const scanner = new Scanner(index)
+    scanner.scan(root)
+    const handlers = new Handlers(index, scanner)
+
+    expect(handlers.references({
+      textDocument: { uri: `file://${filePath}` },
+      position: { line: 3, character: 6 },
+      context: { includeDeclaration: true },
+    })).toEqual([])
+  })
+})

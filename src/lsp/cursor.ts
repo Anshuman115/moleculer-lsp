@@ -17,13 +17,6 @@ const reservedThisProps = new Set([
   'broker', 'logger', 'actions', 'settings', 'metadata', 'schema', 'Promise', 'name', 'version',
 ])
 
-const globals = new Set([
-  'console', 'JSON', 'Math', 'Object', 'Array', 'String', 'Number', 'Boolean',
-  'Promise', 'Buffer', 'process', 'fs', 'path', 'os', 'http', 'https', 'url',
-  'crypto', 'stream', 'events', 'util', 'assert', 'vm', 'ctx', 'broker',
-  'logger', 'req', 'res', 'next', 'err', 'error', 'this', 'await',
-])
-
 export function detect(source: string, line: number, character: number, namespace: string): CursorContext {
   const text = source.split('\n')[line]
   if (text === undefined) {
@@ -32,7 +25,6 @@ export function detect(source: string, line: number, character: number, namespac
   return definitionAt(text, character, namespace)
     ?? stringLiteralAt(text, character, namespace)
     ?? thisCallAt(text, character, namespace)
-    ?? localCallAt(text, character, namespace)
     ?? unknown()
 }
 
@@ -103,27 +95,11 @@ function thisCallAt(text: string, character: number, namespace: string): CursorC
     const method = dot < 0 ? raw : raw.slice(dot + 1)
     const holder = dot < 0 ? undefined : raw.slice(0, dot)
     const blocked = holder === undefined ? reservedThisProps.has(method) : reservedThisProps.has(holder)
-    if (method.length > 0 && !blocked && character >= start && character < open) {
+    const methodStart = nameStart + text.slice(nameStart, open).indexOf(raw) + dot + 1
+    if (isMemberChain(raw) && !blocked && character >= methodStart && character < methodStart + method.length) {
       return { kind: CursorKind.MethodAccess, fullName: `${namespace}.${method}`, chained: holder !== undefined }
     }
     from = open + 1
-  }
-  return undefined
-}
-
-function localCallAt(text: string, character: number, namespace: string): CursorContext | undefined {
-  const pattern = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\.([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(text)) !== null) {
-    const holder = match[1] ?? ''
-    const method = match[2] ?? ''
-    if (holder.length <= 1 || globals.has(holder) || reservedThisProps.has(method)) {
-      continue
-    }
-    const start = match.index + holder.length + 1
-    if (character >= start && character < start + method.length) {
-      return { kind: CursorKind.MethodAccess, fullName: `${namespace}.${method}`, chained: true }
-    }
   }
   return undefined
 }
@@ -184,6 +160,10 @@ function isDigit(value: string): boolean {
 
 function isIdentifier(value: string): boolean {
   return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(value)
+}
+
+function isMemberChain(value: string): boolean {
+  return /^[a-zA-Z_$][a-zA-Z0-9_$]*(\.[a-zA-Z_$][a-zA-Z0-9_$]*)*$/.test(value)
 }
 
 function unknown(): CursorContext {

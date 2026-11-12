@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url'
 import type { Readable, Writable } from 'node:stream'
 import { Index } from '../index/Index.js'
 import { Scanner } from '../scanner/scanner.js'
+import { isMoleculerWorkspace } from '../scanner/workspace.js'
 import { Watcher } from '../scanner/watcher.js'
 import { diagnosticsByFile } from './diagnostics.js'
 import { Handlers, uriToPath } from './handlers.js'
@@ -13,7 +14,17 @@ import { log } from '../log.js'
 
 export interface ServerOptions {
   typescriptFallback?: boolean | TypeScriptCommand
+  typescriptDiagnostics?: boolean
 }
+
+const passThroughMethods = new Set([
+  'textDocument/hover',
+  'textDocument/implementation',
+  'textDocument/prepareCallHierarchy',
+  'callHierarchy/incomingCalls',
+  'callHierarchy/outgoingCalls',
+  'workspace/symbol',
+])
 
 enum ScanState {
   Pending = 'pending',
@@ -28,8 +39,11 @@ export class Server {
   private readonly watcher: Watcher
   private readonly transport: Transport
   private readonly queued: RequestMessage[] = []
-  private readonly published = new Set<string>()
+  private readonly openFiles = new Set<string>()
+  private readonly moleculerDiagnostics = new Map<string, Diagnostic[]>()
+  private readonly typescriptDiagnostics = new Map<string, Diagnostic[]>()
   private rootPath = process.cwd()
+  private moleculerWorkspace = false
   private scanState = ScanState.Pending
   private scanError = ''
   private pullDiagnostics = false
@@ -126,7 +140,9 @@ export class Server {
         this.diagnosticRequest(message)
         return
       default:
-        if (message.id !== undefined) {
+        if (passThroughMethods.has(message.method) && this.bridge !== undefined) {
+          this.passThrough(message, this.bridge)
+        } else if (message.id !== undefined) {
           this.transport.writeError(message.id, ErrorCodes.MethodNotFound, `method not found: ${message.method}`)
         }
     }
@@ -143,6 +159,7 @@ export class Server {
         this.rootPath = fileURLToPath(first.uri)
       }
     }
+    this.moleculerWorkspace = isMoleculerWorkspace(this.rootPath)
     const capabilities = isRecord(params.capabilities) ? params.capabilities : {}
     const textDocument = isRecord(capabilities.textDocument) ? capabilities.textDocument : {}
     const workspace = isRecord(capabilities.workspace) ? capabilities.workspace : {}
@@ -159,17 +176,27 @@ export class Server {
         ...(this.pullDiagnostics
           ? { diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false } }
           : {}),
+        ...(this.bridge === undefined
+          ? {}
+          : { hoverProvider: true, implementationProvider: true, callHierarchyProvider: true, workspaceSymbolProvider: true }),
       },
       serverInfo: { name: 'moleculer-lsp', version: VERSION },
     })
   }
 
   private startScan(): void {
+    if (!this.moleculerWorkspace) {
+      log(`no moleculer.config.* or moleculer dependency at or above ${this.rootPath}; index disabled`)
+      this.scanState = ScanState.Ready
+      this.flushQueued()
+      return
+    }
     setTimeout(() => {
       const started = Date.now()
       try {
         const result = this.scanner.scan(this.rootPath)
         this.scanState = ScanState.Ready
+        this.collectDiagnostics()
         const stats = this.index.stats()
         log(`indexed ${stats.symbolCount} symbols in ${result.fileCount} files (${Date.now() - started}ms)`)
         log(`references ${stats.referenceCount}, unresolved ${result.dropped.length}, mixin failures ${result.mixinFailures.length}`)
@@ -187,9 +214,13 @@ export class Server {
   }
 
   private rescan(): void {
+    if (!this.moleculerWorkspace) {
+      return
+    }
     try {
       this.scanner.scan(this.rootPath)
       this.scanState = ScanState.Ready
+      this.collectDiagnostics()
       this.publishDiagnostics()
     } catch (error) {
       log(`rescan failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -229,6 +260,16 @@ export class Server {
     )
   }
 
+  private passThrough(message: RequestMessage, bridge: TypeScriptBridge): void {
+    const record = isRecord(message.params) ? message.params : {}
+    const item = isRecord(record.item) ? record.item : {}
+    const uri = textDocument(message.params)?.uri ?? (typeof item.uri === 'string' ? item.uri : undefined)
+    void bridge.request(message.method, message.params, uri).then(
+      (result) => this.transport.writeResult(message.id, result),
+      () => this.transport.writeResult(message.id, null),
+    )
+  }
+
   private createBridge(): TypeScriptBridge | undefined {
     const setting = this.options.typescriptFallback
     if (setting === undefined || setting === false) {
@@ -240,7 +281,10 @@ export class Server {
       return undefined
     }
     log(`typescript fallback: ${command.command} ${command.args.join(' ')}`)
-    return new TypeScriptBridge(command, this.rootPath)
+    const onDiagnostics = this.options.typescriptDiagnostics === true
+      ? (uri: string, diagnostics: unknown[]) => this.receiveTypeScriptDiagnostics(uri, diagnostics)
+      : undefined
+    return new TypeScriptBridge(command, this.rootPath, onDiagnostics)
   }
 
   private documentSymbolRequest(message: RequestMessage): void {
@@ -260,18 +304,12 @@ export class Server {
       this.queued.push(message)
       return
     }
-    if (this.scanState === ScanState.Failed) {
-      this.transport.writeResult(message.id, { kind: 'full', items: [] as Diagnostic[] })
-      return
-    }
     const document = textDocument(message.params)
     if (document === undefined) {
       this.transport.writeError(message.id, ErrorCodes.InvalidParams, 'textDocument/diagnostic requires a document uri')
       return
     }
-    const fileId = this.index.fileIdOf(uriToPath(document.uri))
-    const items = fileId === undefined ? [] : diagnosticsByFile(this.index, this.scanner).get(fileId) ?? []
-    this.transport.writeResult(message.id, { kind: 'full', items })
+    this.transport.writeResult(message.id, { kind: 'full', items: this.diagnosticsFor(uriToPath(document.uri)) })
   }
 
   private didOpen(params: unknown): void {
@@ -279,6 +317,13 @@ export class Server {
     if (document !== undefined && typeof document.text === 'string') {
       this.handlers.openDocument(document.uri, document.text)
       this.bridge?.track(document.uri, document.text)
+      this.openFiles.add(uriToPath(document.uri))
+      if (this.options.typescriptDiagnostics === true) {
+        void this.bridge?.show(document.uri)
+      }
+      if (this.scanState === ScanState.Ready && !this.pullDiagnostics) {
+        this.publishFile(uriToPath(document.uri))
+      }
     }
   }
 
@@ -294,7 +339,7 @@ export class Server {
   }
 
   private didSave(): void {
-    this.rescan()
+    this.watcher.trigger()
   }
 
   private didClose(params: unknown): void {
@@ -302,7 +347,41 @@ export class Server {
     if (document !== undefined) {
       this.handlers.closeDocument(document.uri)
       this.bridge?.forget(document.uri)
+      this.closeFile(uriToPath(document.uri))
     }
+  }
+
+  private closeFile(filePath: string): void {
+    this.openFiles.delete(filePath)
+    this.typescriptDiagnostics.delete(filePath)
+    if (!this.pullDiagnostics) {
+      this.transport.writeNotification('textDocument/publishDiagnostics', { uri: pathUri(filePath), diagnostics: [] as Diagnostic[] })
+    }
+  }
+
+  private collectDiagnostics(): void {
+    this.moleculerDiagnostics.clear()
+    for (const [fileId, diagnostics] of diagnosticsByFile(this.index, this.scanner)) {
+      this.moleculerDiagnostics.set(this.index.filePath(fileId), diagnostics)
+    }
+  }
+
+  private receiveTypeScriptDiagnostics(uri: string, diagnostics: unknown[]): void {
+    const filePath = uriToPath(uri)
+    this.typescriptDiagnostics.set(filePath, diagnostics as Diagnostic[])
+    if (this.pullDiagnostics) {
+      this.publishDiagnostics()
+    } else if (this.openFiles.has(filePath)) {
+      this.publishFile(filePath)
+    }
+  }
+
+  private diagnosticsFor(filePath: string): Diagnostic[] {
+    return [...this.moleculerDiagnostics.get(filePath) ?? [], ...this.typescriptDiagnostics.get(filePath) ?? []]
+  }
+
+  private publishFile(filePath: string): void {
+    this.transport.writeNotification('textDocument/publishDiagnostics', { uri: pathUri(filePath), diagnostics: this.diagnosticsFor(filePath) })
   }
 
   private publishDiagnostics(): void {
@@ -312,21 +391,8 @@ export class Server {
       }
       return
     }
-    const byFile = diagnosticsByFile(this.index, this.scanner)
-    const current = new Set<string>()
-    for (const [fileId, diagnostics] of byFile) {
-      const uri = pathUri(this.index.filePath(fileId))
-      current.add(uri)
-      this.transport.writeNotification('textDocument/publishDiagnostics', { uri, diagnostics })
-    }
-    for (const uri of this.published) {
-      if (!current.has(uri)) {
-        this.transport.writeNotification('textDocument/publishDiagnostics', { uri, diagnostics: [] as Diagnostic[] })
-      }
-    }
-    this.published.clear()
-    for (const uri of current) {
-      this.published.add(uri)
+    for (const filePath of this.openFiles) {
+      this.publishFile(filePath)
     }
   }
 }

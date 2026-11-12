@@ -1,9 +1,9 @@
 {
     "moleculer": {
-        "command": "node",
+        "command": "moleculer-lsp",
         "args": [
-            "${CLAUDE_PLUGIN_ROOT}/dist/main.js",
-            "--stdio"
+            "--stdio",
+            "--typescript-diagnostics"
         ],
         "extensionToLanguage": {
             ".js": "javascript"

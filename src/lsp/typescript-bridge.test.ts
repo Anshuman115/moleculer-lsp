@@ -53,9 +53,17 @@ describe('resolveTypeScriptCommand', () => {
     })
   })
 
-  it('finds nothing when neither server is installed', () => {
+  it('finds nothing when no server is installed or bundled', () => {
     installTypeScript(true)
 
-    expect(resolveTypeScriptCommand(root, '')).toBeUndefined()
+    expect(resolveTypeScriptCommand(root, '', () => undefined)).toBeUndefined()
+  })
+
+  it('resolves the bundled TypeScript 7 by default', () => {
+    const command = resolveTypeScriptCommand(root, '')
+
+    expect(command?.command).toBe(process.execPath)
+    expect(command?.args[0]).toMatch(/node_modules\/typescript\/bin\/tsc$/)
+    expect(command?.args.slice(1)).toEqual(['--lsp', '--stdio'])
   })
 })

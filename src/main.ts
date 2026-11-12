@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs'
+import path from 'node:path'
 import { Index } from './index/Index.js'
 import { MoleculerParser } from './parser/moleculerParser.js'
 import { Scanner } from './scanner/scanner.js'
@@ -9,18 +10,21 @@ import { VERSION } from './version.js'
 const usage = `Usage: moleculer-lsp [options]
 
 Options:
-  --stdio                  Start the language server over stdio (default)
-  --typescript-fallback    Send definition, references and symbol requests the index cannot answer to TypeScript
-  --scan <dir>             Index a workspace and print a summary
-  --parse <file>           Print symbols and references for one file
-  --version                Print the version
-  --help                   Print this help
+  --stdio                    Start the language server over stdio (default)
+  --typescript-fallback      Send requests the index cannot answer, and hover, implementation,
+                             call hierarchy and workspace symbol requests, to TypeScript
+  --typescript-diagnostics   Also report TypeScript diagnostics for open files (implies --typescript-fallback)
+  --scan <dir>               Index a workspace and print a summary
+  --parse <file>             Print symbols and references for one file
+  --version                  Print the version
+  --help                     Print this help
 `
 
 const typescriptFallbackFlag = '--typescript-fallback'
+const typescriptDiagnosticsFlag = '--typescript-diagnostics'
 
 async function main(args: string[]): Promise<void> {
-  const command = args.find((arg) => arg !== typescriptFallbackFlag && !arg.startsWith('--stdio'))
+  const command = args.find((arg) => arg !== typescriptFallbackFlag && arg !== typescriptDiagnosticsFlag && !arg.startsWith('--stdio'))
 
   if (command === '--version') {
     process.stdout.write(`moleculer-lsp ${VERSION}\n`)
@@ -39,7 +43,11 @@ async function main(args: string[]): Promise<void> {
     return
   }
 
-  await new Server(process.stdin, process.stdout, { typescriptFallback: args.includes(typescriptFallbackFlag) }).run()
+  const typescriptDiagnostics = args.includes(typescriptDiagnosticsFlag)
+  await new Server(process.stdin, process.stdout, {
+    typescriptFallback: typescriptDiagnostics || args.includes(typescriptFallbackFlag),
+    typescriptDiagnostics,
+  }).run()
 }
 
 function parseFile(filePath: string | undefined): void {
@@ -69,7 +77,7 @@ function scanWorkspace(rootPath: string | undefined): void {
   const index = new Index()
   const scanner = new Scanner(index)
   const started = Date.now()
-  const result = scanner.scan(rootPath)
+  const result = scanner.scan(path.resolve(rootPath))
   const stats = index.stats()
 
   process.stdout.write(`root: ${rootPath}\n`)

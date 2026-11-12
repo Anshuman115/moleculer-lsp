@@ -34,17 +34,18 @@ export class Watcher {
     this.watcher = undefined
   }
 
-  private schedule(filePath: string): void {
-    if (!filePath.endsWith('.js')) {
-      return
-    }
-    if (this.timer !== undefined) {
-      clearTimeout(this.timer)
-    }
+  trigger(): void {
+    clearTimeout(this.timer)
     this.timer = setTimeout(() => {
       this.timer = undefined
       this.onChange()
     }, this.debounceMs)
+  }
+
+  private schedule(filePath: string): void {
+    if (filePath.endsWith('.js')) {
+      this.trigger()
+    }
   }
 }
 
