@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+### Changed
+
+- README: monthly downloads, total downloads and Node.js version badges.
+
 ## 0.4.0
 
 ### Changed

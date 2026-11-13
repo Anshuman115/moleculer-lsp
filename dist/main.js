@@ -8249,7 +8249,7 @@ var Workspace = class {
 // package.json
 var package_default = {
   name: "moleculer-lsp",
-  version: "0.4.0",
+  version: "0.4.1",
   description: "Language server for Moleculer.js: go to definition, find references, document symbols and diagnostics across services, mixins and events",
   keywords: [
     "moleculer",

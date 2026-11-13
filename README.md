@@ -1,6 +1,9 @@
 # Moleculer LSP
 
 [![npm](https://img.shields.io/npm/v/moleculer-lsp)](https://www.npmjs.com/package/moleculer-lsp)
+[![monthly downloads](https://img.shields.io/npm/dm/moleculer-lsp)](https://www.npmjs.com/package/moleculer-lsp)
+[![total downloads](https://img.shields.io/npm/d18m/moleculer-lsp)](https://www.npmjs.com/package/moleculer-lsp)
+[![node](https://img.shields.io/node/v/moleculer-lsp)](https://www.npmjs.com/package/moleculer-lsp)
 [![license](https://img.shields.io/npm/l/moleculer-lsp)](./LICENSE)
 
 Go to definition, find references and diagnostics for [Moleculer.js](https://moleculer.services/) services, actions, events and mixins. Optional JavaScript support uses the bundled [tsrs](https://github.com/oxc-project/tsrs) language server.
