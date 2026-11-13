@@ -1,89 +1,72 @@
 import { describe, expect, it } from 'vitest'
-import { CursorKind, detect } from './cursor.js'
+import { CursorKind, targetAt, type CursorTarget } from './cursor.js'
 
-function at(source: string, marker: string, namespace = 'users'): ReturnType<typeof detect> {
+function at(source: string, marker: string): CursorTarget | undefined {
   const line = source.split('\n').findIndex((text) => text.includes(marker))
   const character = (source.split('\n')[line] ?? '').indexOf(marker) + Math.floor(marker.length / 2)
-  return detect(source, line, character, namespace)
+  return targetAt(source, line, character)
 }
 
-describe('detect', () => {
-  it('classifies the action segment of a dotted string', () => {
-    const context = at('await ctx.call("mail.send")', 'send')
-    expect(context.kind).toBe(CursorKind.ActionString)
-    expect(context.fullName).toBe('mail.send')
+describe('targetAt', () => {
+  it('returns the whole string for the action segment of a dotted string', () => {
+    expect(at('await ctx.call("mail.send")', 'send')).toEqual({ kind: CursorKind.Text, value: 'mail.send' })
   })
 
-  it('classifies the service segment of a dotted string', () => {
-    const context = at('await ctx.call("mail.send")', 'mail')
-    expect(context.kind).toBe(CursorKind.ServiceName)
-    expect(context.fullName).toBe('mail.send')
+  it('marks the service segment of a dotted string', () => {
+    expect(at('await ctx.call("mail.send")', 'mail')).toEqual({ kind: CursorKind.ServiceSegment, value: 'mail.send' })
   })
 
-  it('treats the segment after a version prefix as the service name', () => {
-    const context = at('await ctx.call("v2.mail.send")', 'mail')
-    expect(context.kind).toBe(CursorKind.ServiceName)
+  it('treats the segment after a version prefix as the service segment', () => {
+    expect(at('await ctx.call("v2.mail.send")', 'mail')?.kind).toBe(CursorKind.ServiceSegment)
   })
 
-  it('qualifies a bare string with the current namespace', () => {
-    const context = at('ctx.emit("refresh")', 'refresh')
-    expect(context.kind).toBe(CursorKind.MethodAccess)
-    expect(context.fullName).toBe('users.refresh')
+  it('returns a bare identifier string as text', () => {
+    expect(at('ctx.emit("refresh")', 'refresh')).toEqual({ kind: CursorKind.Text, value: 'refresh' })
   })
 
-  it('resolves a this-method call against the namespace', () => {
-    const context = at('return this.hashPassword(value)', 'hashPassword')
-    expect(context.kind).toBe(CursorKind.MethodAccess)
-    expect(context.fullName).toBe('users.hashPassword')
+  it('returns the method name of a this-call', () => {
+    expect(at('return this.hashPassword(value)', 'hashPassword')).toEqual({ kind: CursorKind.Member, value: 'hashPassword' })
   })
 
   it('leaves the this keyword itself to TypeScript', () => {
-    expect(at('return this.hashPassword(value)', 'this').kind).toBe(CursorKind.Unknown)
-  })
-
-  it('marks a chained this-call as chained', () => {
-    const context = at('return this.client.connect()', 'connect')
-    expect(context.chained).toBe(true)
+    expect(at('return this.hashPassword(value)', 'this')).toBeUndefined()
   })
 
   it('ignores framework properties on this', () => {
-    expect(at('this.logger.info("x")', 'info').kind).toBe(CursorKind.Unknown)
+    expect(at('this.logger.info("x")', 'info')).toBeUndefined()
   })
 
   it('ignores known globals on a local call', () => {
-    expect(at('console.log("x")', 'log').kind).toBe(CursorKind.Unknown)
+    expect(at('console.log("x")', 'log')).toBeUndefined()
   })
 
   it('leaves method calls on plain objects to TypeScript', () => {
-    expect(at('Passwordless.init({ contactMethod })', 'init').kind).toBe(CursorKind.Unknown)
+    expect(at('Passwordless.init({ contactMethod })', 'init')).toBeUndefined()
   })
 
   it('does not treat a call assigned to a this-property as a this-call', () => {
     const source = 'this.client = HttpClientFactory.createClientV2(config)'
-    expect(at(source, 'HttpClientFactory').kind).toBe(CursorKind.Unknown)
-    expect(at(source, 'createClientV2').kind).toBe(CursorKind.Unknown)
+    expect(at(source, 'HttpClientFactory')).toBeUndefined()
+    expect(at(source, 'createClientV2')).toBeUndefined()
   })
 
-  it('detects a definition site key', () => {
-    const context = at('        createUser(ctx) {', 'createUser')
-    expect(context.kind).toBe(CursorKind.DefinitionSite)
-    expect(context.fullName).toBe('users.createUser')
+  it('returns the key of a definition site', () => {
+    expect(at('        createUser(ctx) {', 'createUser')).toEqual({ kind: CursorKind.Declaration, value: 'createUser' })
   })
 
-  it('detects a quoted definition site key', () => {
-    const context = at('        "user.created": function (ctx) {', 'user.created')
-    expect(context.kind).toBe(CursorKind.DefinitionSite)
+  it('returns the unquoted key of a quoted definition site', () => {
+    expect(at('        "user.created": function (ctx) {', 'user.created')).toEqual({ kind: CursorKind.Declaration, value: 'user.created' })
   })
 
   it('skips the handler key', () => {
-    expect(at('          handler(ctx) {', 'handler').kind).toBe(CursorKind.Unknown)
+    expect(at('          handler(ctx) {', 'handler')).toBeUndefined()
   })
 
-  it('returns unknown for a line out of range', () => {
-    expect(detect('const a = 1', 99, 0, 'users').kind).toBe(CursorKind.Unknown)
+  it('returns nothing for a line out of range', () => {
+    expect(targetAt('const a = 1', 99, 0)).toBeUndefined()
   })
 
-  it('returns unknown for plain code', () => {
-    expect(at('const total = a + b', 'total').kind).toBe(CursorKind.Unknown)
+  it('returns nothing for plain code', () => {
+    expect(at('const total = a + b', 'total')).toBeUndefined()
   })
 })

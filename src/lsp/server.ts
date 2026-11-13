@@ -1,59 +1,93 @@
-import { fileURLToPath } from 'node:url'
 import type { Readable, Writable } from 'node:stream'
-import { Index } from '../index/Index.js'
-import { Scanner } from '../scanner/scanner.js'
-import { isMoleculerWorkspace } from '../scanner/workspace.js'
-import { Watcher } from '../scanner/watcher.js'
-import { diagnosticsByFile } from './diagnostics.js'
-import { Handlers, uriToPath } from './handlers.js'
-import { ErrorCodes, isRecord, type Diagnostic, type DocumentSymbolParams, type Position, type ReferenceParams, type RequestMessage, type TextDocumentPositionParams } from './protocol.js'
-import { MessageFormatError, Transport } from './transport.js'
-import { resolveTypeScriptCommand, TypeScriptBridge, type TypeScriptCommand } from './typescript-bridge.js'
+import { errorMessage, log } from '../log.js'
+import { Workspace } from '../scanner/workspace.js'
 import { VERSION } from '../version.js'
-import { log } from '../log.js'
+import { diagnosticsByFile } from './diagnostics.js'
+import { DiagnosticsMode, DiagnosticsPublisher, type DiagnosticsSink } from './diagnostics-publisher.js'
+import { Documents } from './documents.js'
+import { Handlers } from './handlers.js'
+import {
+  documentSymbolParams,
+  ErrorCodes,
+  isRecord,
+  positionParams,
+  referenceParams,
+  textDocumentOf,
+  type Diagnostic,
+  type RequestMessage,
+} from './protocol.js'
+import { MessageFormatError, Transport } from './transport.js'
+import { TypeScriptBridge, TypeScriptBridgeError } from './typescript-bridge.js'
+import type { TypeScriptCommand } from './typescript-command.js'
+import { uriToPath } from './uri.js'
 
 export interface ServerOptions {
-  typescriptFallback?: boolean | TypeScriptCommand
+  typescript?: () => TypeScriptCommand
   typescriptDiagnostics?: boolean
 }
 
-const passThroughMethods = new Set([
-  'textDocument/hover',
-  'textDocument/implementation',
-  'textDocument/prepareCallHierarchy',
-  'callHierarchy/incomingCalls',
-  'callHierarchy/outgoingCalls',
-  'workspace/symbol',
-])
+interface IndexQuery {
+  uri: string
+  answer: (handlers: Handlers) => unknown
+}
 
-enum ScanState {
-  Pending = 'pending',
-  Ready = 'ready',
-  Failed = 'failed',
+interface IndexMethod {
+  capability: string
+  empty: null | []
+  query: (params: unknown) => IndexQuery | undefined
+}
+
+const indexMethods: Record<string, IndexMethod> = {
+  'textDocument/definition': {
+    capability: 'definitionProvider',
+    empty: null,
+    query: (params) => {
+      const parsed = positionParams(params)
+      return parsed && { uri: parsed.textDocument.uri, answer: (handlers) => handlers.definition(parsed) }
+    },
+  },
+  'textDocument/references': {
+    capability: 'referencesProvider',
+    empty: [],
+    query: (params) => {
+      const parsed = referenceParams(params)
+      return parsed && { uri: parsed.textDocument.uri, answer: (handlers) => handlers.references(parsed) }
+    },
+  },
+  'textDocument/documentSymbol': {
+    capability: 'documentSymbolProvider',
+    empty: [],
+    query: (params) => {
+      const parsed = documentSymbolParams(params)
+      return parsed && { uri: parsed.textDocument.uri, answer: (handlers) => handlers.documentSymbols(parsed) }
+    },
+  },
+}
+
+const typescriptMethods: Record<string, string> = {
+  'textDocument/hover': 'hoverProvider',
+  'textDocument/implementation': 'implementationProvider',
+  'textDocument/prepareCallHierarchy': 'callHierarchyProvider',
+  'callHierarchy/incomingCalls': 'callHierarchyProvider',
+  'callHierarchy/outgoingCalls': 'callHierarchyProvider',
+  'workspace/symbol': 'workspaceSymbolProvider',
+}
+
+interface Session {
+  workspace: Workspace
+  documents: Documents
+  handlers: Handlers
+  diagnostics: DiagnosticsPublisher
+  bridge: TypeScriptBridge | undefined
 }
 
 export class Server {
-  private readonly index = new Index()
-  private readonly scanner = new Scanner(this.index)
-  private readonly handlers = new Handlers(this.index, this.scanner)
-  private readonly watcher: Watcher
   private readonly transport: Transport
-  private readonly queued: RequestMessage[] = []
-  private readonly openFiles = new Set<string>()
-  private readonly moleculerDiagnostics = new Map<string, Diagnostic[]>()
-  private readonly typescriptDiagnostics = new Map<string, Diagnostic[]>()
-  private rootPath = process.cwd()
-  private moleculerWorkspace = false
-  private scanState = ScanState.Pending
-  private scanError = ''
-  private pullDiagnostics = false
-  private refreshSupport = false
+  private session: Session | undefined
   private nextServerRequestId = 1
-  private bridge: TypeScriptBridge | undefined
 
   constructor(readable: Readable, writable: Writable, private readonly options: ServerOptions = {}) {
     this.transport = new Transport(readable, writable)
-    this.watcher = new Watcher(() => this.rescan())
   }
 
   async run(): Promise<void> {
@@ -70,18 +104,20 @@ export class Server {
         throw error
       }
       if (body === undefined) {
-        this.watcher.close()
-        this.bridge?.stop()
+        this.close()
         return
       }
-      let message: RequestMessage
+      let message: unknown
       try {
-        message = JSON.parse(body.toString('utf8')) as RequestMessage
+        message = JSON.parse(body.toString('utf8'))
       } catch {
+        message = undefined
+      }
+      if (!isRecord(message)) {
         this.transport.writeError(null, ErrorCodes.ParseError, 'invalid JSON-RPC message')
         continue
       }
-      this.dispatch(message)
+      this.dispatch(message as unknown as RequestMessage)
     }
   }
 
@@ -89,7 +125,7 @@ export class Server {
     try {
       this.route(message)
     } catch (error) {
-      const text = error instanceof Error ? error.message : String(error)
+      const text = errorMessage(error)
       log(`request failed: ${message.method}: ${text}`)
       if (message.id !== undefined) {
         this.transport.writeError(message.id, ErrorCodes.InternalError, text)
@@ -101,345 +137,214 @@ export class Server {
     if (typeof message.method !== 'string') {
       return
     }
+    if (message.method === 'initialize') {
+      this.initialize(message)
+      return
+    }
+    if (message.method === 'shutdown') {
+      this.close()
+      this.transport.writeResult(message.id, null)
+      return
+    }
+    if (message.method === 'exit') {
+      this.close()
+      process.exit(0)
+    }
+    const session = this.session
+    if (session === undefined) {
+      if (message.id !== undefined) {
+        this.transport.writeError(message.id, ErrorCodes.ServerNotInitialized, 'server not initialized')
+      }
+      return
+    }
+    this.routeSession(session, message)
+  }
+
+  private routeSession(session: Session, message: RequestMessage): void {
+    const indexMethod = indexMethods[message.method]
+    if (indexMethod !== undefined) {
+      this.indexRequest(session, message, indexMethod)
+      return
+    }
     switch (message.method) {
-      case 'initialize':
-        this.initialize(message)
-        return
       case 'initialized':
-        this.startScan()
+        session.workspace.start()
         return
-      case 'shutdown':
-        this.watcher.close()
-        this.bridge?.stop()
-        this.transport.writeResult(message.id, null)
-        return
-      case 'exit':
-        this.watcher.close()
-        this.bridge?.stop()
-        process.exit(0)
       case 'textDocument/didOpen':
-        this.didOpen(message.params)
+        this.didOpen(session, message.params)
         return
       case 'textDocument/didChange':
-        this.didChange(message.params)
+        this.didChange(session, message.params)
         return
       case 'textDocument/didSave':
-        this.didSave()
+        session.workspace.changed()
         return
       case 'textDocument/didClose':
-        this.didClose(message.params)
-        return
-      case 'textDocument/definition':
-      case 'textDocument/references':
-        this.documentRequest(message)
-        return
-      case 'textDocument/documentSymbol':
-        this.documentSymbolRequest(message)
+        this.didClose(session, message.params)
         return
       case 'textDocument/diagnostic':
-        this.diagnosticRequest(message)
+        this.diagnosticRequest(session, message)
         return
-      default:
-        if (passThroughMethods.has(message.method) && this.bridge !== undefined) {
-          this.passThrough(message, this.bridge)
-        } else if (message.id !== undefined) {
-          this.transport.writeError(message.id, ErrorCodes.MethodNotFound, `method not found: ${message.method}`)
-        }
+    }
+    if (typescriptMethods[message.method] !== undefined && session.bridge !== undefined) {
+      this.passThrough(session.bridge, message)
+    } else if (message.id !== undefined) {
+      this.transport.writeError(message.id, ErrorCodes.MethodNotFound, `method not found: ${message.method}`)
     }
   }
 
   private initialize(message: RequestMessage): void {
     const params = isRecord(message.params) ? message.params : {}
-    const rootUri = typeof params.rootUri === 'string' ? params.rootUri : ''
-    if (rootUri.length > 0) {
-      this.rootPath = fileURLToPath(rootUri)
-    } else if (Array.isArray(params.workspaceFolders)) {
-      const first = params.workspaceFolders[0]
-      if (isRecord(first) && typeof first.uri === 'string') {
-        this.rootPath = fileURLToPath(first.uri)
-      }
-    }
-    this.moleculerWorkspace = isMoleculerWorkspace(this.rootPath)
+    const rootPath = rootPathOf(params)
     const capabilities = isRecord(params.capabilities) ? params.capabilities : {}
     const textDocument = isRecord(capabilities.textDocument) ? capabilities.textDocument : {}
     const workspace = isRecord(capabilities.workspace) ? capabilities.workspace : {}
     const workspaceDiagnostics = isRecord(workspace.diagnostics) ? workspace.diagnostics : {}
-    this.pullDiagnostics = isRecord(textDocument.diagnostic)
-    this.refreshSupport = workspaceDiagnostics.refreshSupport === true
-    this.bridge = this.createBridge()
+    const pullDiagnostics = isRecord(textDocument.diagnostic)
+    const mode = pullDiagnostics ? DiagnosticsMode.Pull : DiagnosticsMode.Push
+    this.session = this.openSession(rootPath, mode, workspaceDiagnostics.refreshSupport === true)
     this.transport.writeResult(message.id, {
       capabilities: {
         textDocumentSync: { openClose: true, change: 1, save: true },
-        definitionProvider: true,
-        referencesProvider: true,
-        documentSymbolProvider: true,
-        ...(this.pullDiagnostics
-          ? { diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false } }
-          : {}),
-        ...(this.bridge === undefined
-          ? {}
-          : { hoverProvider: true, implementationProvider: true, callHierarchyProvider: true, workspaceSymbolProvider: true }),
+        ...providers(Object.values(indexMethods).map((method) => method.capability)),
+        ...(pullDiagnostics ? { diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false } } : {}),
+        ...(this.session.bridge === undefined ? {} : providers(Object.values(typescriptMethods))),
       },
       serverInfo: { name: 'moleculer-lsp', version: VERSION },
     })
   }
 
-  private startScan(): void {
-    if (!this.moleculerWorkspace) {
-      log(`no moleculer.config.* or moleculer dependency at or above ${this.rootPath}; index disabled`)
-      this.scanState = ScanState.Ready
-      this.flushQueued()
-      return
-    }
-    setTimeout(() => {
-      const started = Date.now()
-      try {
-        const result = this.scanner.scan(this.rootPath)
-        this.scanState = ScanState.Ready
-        this.collectDiagnostics()
-        const stats = this.index.stats()
-        log(`indexed ${stats.symbolCount} symbols in ${result.fileCount} files (${Date.now() - started}ms)`)
-        log(`references ${stats.referenceCount}, unresolved ${result.dropped.length}, mixin failures ${result.mixinFailures.length}`)
-        this.watcher.watch(this.rootPath)
-      } catch (error) {
-        this.scanState = ScanState.Failed
-        this.scanError = error instanceof Error ? error.message : String(error)
-        log(`scan failed: ${this.scanError}`)
-      }
-      this.flushQueued()
-      if (this.scanState === ScanState.Ready) {
-        this.publishDiagnostics()
-      }
-    }, 0)
+  private openSession(rootPath: string, mode: DiagnosticsMode, refreshSupport: boolean): Session {
+    const documents = new Documents()
+    const diagnostics = new DiagnosticsPublisher(this.diagnosticsSink(refreshSupport), mode, documents)
+    const workspace = new Workspace(rootPath, (result) => diagnostics.setMoleculer(diagnosticsByFile(workspace.index, result)))
+    const handlers = new Handlers(workspace.index, workspace.resolution, documents)
+    const bridge = this.createBridge(rootPath, documents, diagnostics)
+    return { workspace, documents, handlers, diagnostics, bridge }
   }
 
-  private rescan(): void {
-    if (!this.moleculerWorkspace) {
-      return
+  private createBridge(rootPath: string, documents: Documents, diagnostics: DiagnosticsPublisher): TypeScriptBridge | undefined {
+    if (this.options.typescript === undefined) {
+      return undefined
     }
-    try {
-      this.scanner.scan(this.rootPath)
-      this.scanState = ScanState.Ready
-      this.collectDiagnostics()
-      this.publishDiagnostics()
-    } catch (error) {
-      log(`rescan failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
+    log('typescript fallback: bundled tsrs (starts on demand)')
+    const onDiagnostics = this.options.typescriptDiagnostics === true
+      ? (uri: string, items: unknown[]) => diagnostics.setTypeScript(uriToPath(uri), items as Diagnostic[])
+      : undefined
+    return new TypeScriptBridge(this.options.typescript, rootPath, documents, onDiagnostics)
   }
 
-  private flushQueued(): void {
-    for (const message of this.queued.splice(0)) {
-      this.dispatch(message)
-    }
-  }
-
-  private documentRequest(message: RequestMessage): void {
-    if (this.scanState === ScanState.Pending) {
-      this.queued.push(message)
+  private indexRequest(session: Session, message: RequestMessage, method: IndexMethod): void {
+    const query = method.query(message.params)
+    if (query === undefined) {
+      this.transport.writeError(message.id, ErrorCodes.InvalidParams, `invalid params for ${message.method}`)
       return
     }
-    if (this.scanState === ScanState.Failed) {
-      this.transport.writeError(message.id, ErrorCodes.ServerNotInitialized, `index unavailable: ${this.scanError}`)
+    const failure = session.workspace.failure
+    if (failure !== undefined && session.bridge === undefined) {
+      this.transport.writeError(message.id, ErrorCodes.ServerNotInitialized, `index unavailable: ${failure}`)
       return
     }
-    const result = message.method === 'textDocument/definition'
-      ? this.handlers.definition(positionParams(message.params))
-      : this.handlers.references(referenceParams(message.params))
-    this.respond(message, result)
-  }
-
-  private respond(message: RequestMessage, result: unknown): void {
-    const uri = textDocument(message.params)?.uri
-    if (this.bridge === undefined || uri === undefined || !isEmpty(result)) {
-      this.transport.writeResult(message.id, result)
+    const answer = failure === undefined && session.workspace.moleculer ? query.answer(session.handlers) : undefined
+    if (answer !== undefined) {
+      this.transport.writeResult(message.id, answer)
       return
     }
-    void this.bridge.request(message.method, message.params, uri).then(
-      (fallback) => this.transport.writeResult(message.id, isEmpty(fallback) ? result : fallback),
-      () => this.transport.writeResult(message.id, result),
+    if (session.bridge === undefined) {
+      this.transport.writeResult(message.id, method.empty)
+      return
+    }
+    void session.bridge.request(message.method, message.params, query.uri).then(
+      (fallback) => this.transport.writeResult(message.id, fallback ?? method.empty),
+      (error: unknown) => this.bridgeError(message, error),
     )
   }
 
-  private passThrough(message: RequestMessage, bridge: TypeScriptBridge): void {
-    const record = isRecord(message.params) ? message.params : {}
-    const item = isRecord(record.item) ? record.item : {}
-    const uri = textDocument(message.params)?.uri ?? (typeof item.uri === 'string' ? item.uri : undefined)
+  private passThrough(bridge: TypeScriptBridge, message: RequestMessage): void {
+    const params = isRecord(message.params) ? message.params : {}
+    const item = isRecord(params.item) ? params.item : {}
+    const uri = textDocumentOf(message.params)?.uri ?? (typeof item.uri === 'string' ? item.uri : undefined)
     void bridge.request(message.method, message.params, uri).then(
       (result) => this.transport.writeResult(message.id, result),
-      () => this.transport.writeResult(message.id, null),
+      (error: unknown) => this.bridgeError(message, error),
     )
   }
 
-  private createBridge(): TypeScriptBridge | undefined {
-    const setting = this.options.typescriptFallback
-    if (setting === undefined || setting === false) {
-      return undefined
-    }
-    const command = setting === true ? resolveTypeScriptCommand(this.rootPath) : setting
-    if (command === undefined) {
-      log('typescript fallback disabled: no tsc with --lsp or typescript-language-server found')
-      return undefined
-    }
-    log(`typescript fallback: ${command.command} ${command.args.join(' ')}`)
-    const onDiagnostics = this.options.typescriptDiagnostics === true
-      ? (uri: string, diagnostics: unknown[]) => this.receiveTypeScriptDiagnostics(uri, diagnostics)
-      : undefined
-    return new TypeScriptBridge(command, this.rootPath, onDiagnostics)
+  private bridgeError(message: RequestMessage, error: unknown): void {
+    this.transport.writeError(message.id, error instanceof TypeScriptBridgeError ? error.code : ErrorCodes.InternalError, errorMessage(error))
   }
 
-  private documentSymbolRequest(message: RequestMessage): void {
-    if (this.scanState === ScanState.Pending) {
-      this.queued.push(message)
-      return
-    }
-    if (this.scanState === ScanState.Failed) {
-      this.transport.writeError(message.id, ErrorCodes.ServerNotInitialized, `index unavailable: ${this.scanError}`)
-      return
-    }
-    this.respond(message, this.handlers.documentSymbols(documentSymbolParams(message.params)))
-  }
-
-  private diagnosticRequest(message: RequestMessage): void {
-    if (this.scanState === ScanState.Pending) {
-      this.queued.push(message)
-      return
-    }
-    const document = textDocument(message.params)
+  private diagnosticRequest(session: Session, message: RequestMessage): void {
+    const document = textDocumentOf(message.params)
     if (document === undefined) {
       this.transport.writeError(message.id, ErrorCodes.InvalidParams, 'textDocument/diagnostic requires a document uri')
       return
     }
-    this.transport.writeResult(message.id, { kind: 'full', items: this.diagnosticsFor(uriToPath(document.uri)) })
-  }
-
-  private didOpen(params: unknown): void {
-    const document = textDocument(params)
-    if (document !== undefined && typeof document.text === 'string') {
-      this.handlers.openDocument(document.uri, document.text)
-      this.bridge?.track(document.uri, document.text)
-      this.openFiles.add(uriToPath(document.uri))
-      if (this.options.typescriptDiagnostics === true) {
-        void this.bridge?.show(document.uri)
-      }
-      if (this.scanState === ScanState.Ready && !this.pullDiagnostics) {
-        this.publishFile(uriToPath(document.uri))
-      }
-    }
-  }
-
-  private didChange(params: unknown): void {
-    const record = isRecord(params) ? params : {}
-    const document = textDocument(params)
-    const changes = Array.isArray(record.contentChanges) ? record.contentChanges : []
-    const latest = changes[changes.length - 1]
-    if (document !== undefined && isRecord(latest) && typeof latest.text === 'string') {
-      this.handlers.openDocument(document.uri, latest.text)
-      this.bridge?.track(document.uri, latest.text)
-    }
-  }
-
-  private didSave(): void {
-    this.watcher.trigger()
-  }
-
-  private didClose(params: unknown): void {
-    const document = textDocument(params)
-    if (document !== undefined) {
-      this.handlers.closeDocument(document.uri)
-      this.bridge?.forget(document.uri)
-      this.closeFile(uriToPath(document.uri))
-    }
-  }
-
-  private closeFile(filePath: string): void {
-    this.openFiles.delete(filePath)
-    this.typescriptDiagnostics.delete(filePath)
-    if (!this.pullDiagnostics) {
-      this.transport.writeNotification('textDocument/publishDiagnostics', { uri: pathUri(filePath), diagnostics: [] as Diagnostic[] })
-    }
-  }
-
-  private collectDiagnostics(): void {
-    this.moleculerDiagnostics.clear()
-    for (const [fileId, diagnostics] of diagnosticsByFile(this.index, this.scanner)) {
-      this.moleculerDiagnostics.set(this.index.filePath(fileId), diagnostics)
-    }
-  }
-
-  private receiveTypeScriptDiagnostics(uri: string, diagnostics: unknown[]): void {
-    const filePath = uriToPath(uri)
-    this.typescriptDiagnostics.set(filePath, diagnostics as Diagnostic[])
-    if (this.pullDiagnostics) {
-      this.publishDiagnostics()
-    } else if (this.openFiles.has(filePath)) {
-      this.publishFile(filePath)
-    }
-  }
-
-  private diagnosticsFor(filePath: string): Diagnostic[] {
-    return [...this.moleculerDiagnostics.get(filePath) ?? [], ...this.typescriptDiagnostics.get(filePath) ?? []]
-  }
-
-  private publishFile(filePath: string): void {
-    this.transport.writeNotification('textDocument/publishDiagnostics', { uri: pathUri(filePath), diagnostics: this.diagnosticsFor(filePath) })
-  }
-
-  private publishDiagnostics(): void {
-    if (this.pullDiagnostics) {
-      if (this.refreshSupport) {
-        this.transport.writeRequest(this.nextServerRequestId++, 'workspace/diagnostic/refresh', {})
-      }
+    const failure = this.options.typescriptDiagnostics === true ? session.bridge?.error : undefined
+    if (failure !== undefined) {
+      this.bridgeError(message, failure)
       return
     }
-    for (const filePath of this.openFiles) {
-      this.publishFile(filePath)
+    this.transport.writeResult(message.id, { kind: 'full', items: session.diagnostics.report(uriToPath(document.uri)) })
+  }
+
+  private didOpen(session: Session, params: unknown): void {
+    const document = textDocumentOf(params)
+    if (document === undefined || typeof document.text !== 'string') {
+      return
+    }
+    const filePath = uriToPath(document.uri)
+    session.documents.set(filePath, document.text)
+    void session.bridge?.opened(document.uri).catch((error: unknown) => log(errorMessage(error)))
+    session.diagnostics.open(filePath)
+  }
+
+  private didChange(session: Session, params: unknown): void {
+    const document = textDocumentOf(params)
+    const changes = isRecord(params) && Array.isArray(params.contentChanges) ? params.contentChanges : []
+    const latest = changes[changes.length - 1]
+    if (document !== undefined && isRecord(latest) && typeof latest.text === 'string') {
+      session.documents.set(uriToPath(document.uri), latest.text)
+      session.bridge?.changed(document.uri)
+    }
+  }
+
+  private didClose(session: Session, params: unknown): void {
+    const document = textDocumentOf(params)
+    if (document === undefined) {
+      return
+    }
+    const filePath = uriToPath(document.uri)
+    session.documents.delete(filePath)
+    session.bridge?.closed(document.uri)
+    session.diagnostics.close(filePath)
+  }
+
+  private close(): void {
+    this.session?.workspace.close()
+    this.session?.bridge?.stop()
+  }
+
+  private diagnosticsSink(refreshSupport: boolean): DiagnosticsSink {
+    return {
+      publish: (uri, diagnostics) => this.transport.writeNotification('textDocument/publishDiagnostics', { uri, diagnostics }),
+      refresh: () => {
+        if (refreshSupport) {
+          this.transport.writeRequest(this.nextServerRequestId++, 'workspace/diagnostic/refresh', {})
+        }
+      },
     }
   }
 }
 
-function textDocument(params: unknown): { uri: string; text?: unknown } | undefined {
-  const record = isRecord(params) ? params : {}
-  const document = isRecord(record.textDocument) ? record.textDocument : undefined
-  if (document === undefined || typeof document.uri !== 'string') {
-    return undefined
+function rootPathOf(params: Record<string, unknown>): string {
+  if (typeof params.rootUri === 'string' && params.rootUri.length > 0) {
+    return uriToPath(params.rootUri)
   }
-  return { uri: document.uri, text: document.text }
+  const first = Array.isArray(params.workspaceFolders) ? params.workspaceFolders[0] : undefined
+  return isRecord(first) && typeof first.uri === 'string' ? uriToPath(first.uri) : process.cwd()
 }
 
-function positionParams(params: unknown): TextDocumentPositionParams {
-  const record = isRecord(params) ? params : {}
-  const document = isRecord(record.textDocument) ? record.textDocument : {}
-  const position = isRecord(record.position) ? record.position : {}
-  return {
-    textDocument: { uri: typeof document.uri === 'string' ? document.uri : '' },
-    position: {
-      line: typeof position.line === 'number' ? position.line : 0,
-      character: typeof position.character === 'number' ? position.character : 0,
-    },
-  }
+function providers(capabilities: string[]): Record<string, true> {
+  return Object.fromEntries(capabilities.map((capability) => [capability, true]))
 }
-
-function referenceParams(params: unknown): ReferenceParams {
-  const record = isRecord(params) ? params : {}
-  const context = isRecord(record.context) ? record.context : {}
-  return {
-    ...positionParams(params),
-    context: { includeDeclaration: context.includeDeclaration === true },
-  }
-}
-
-function documentSymbolParams(params: unknown): DocumentSymbolParams {
-  const document = textDocument(params)
-  return { textDocument: { uri: document?.uri ?? '' } }
-}
-
-function isEmpty(result: unknown): boolean {
-  return result === null || result === undefined || (Array.isArray(result) && result.length === 0)
-}
-
-function pathUri(filePath: string): string {
-  return new URL(`file://${filePath}`).toString()
-}
-
-export { uriToPath }
-export type { Position }

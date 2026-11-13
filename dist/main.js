@@ -1,1856 +1,62 @@
 #!/usr/bin/env node
-import{createRequire}from'node:module';const require=createRequire(import.meta.url);
-var __defProp = Object.defineProperty;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
-};
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-
-// node_modules/readdirp/esm/index.js
-import { stat, lstat, readdir, realpath } from "node:fs/promises";
-import { Readable } from "node:stream";
-import { resolve as presolve, relative as prelative, join as pjoin, sep as psep } from "node:path";
-function readdirp(root, options = {}) {
-  let type = options.entryType || options.type;
-  if (type === "both")
-    type = EntryTypes.FILE_DIR_TYPE;
-  if (type)
-    options.type = type;
-  if (!root) {
-    throw new Error("readdirp: root argument is required. Usage: readdirp(root, options)");
-  } else if (typeof root !== "string") {
-    throw new TypeError("readdirp: root argument must be a string. Usage: readdirp(root, options)");
-  } else if (type && !ALL_TYPES.includes(type)) {
-    throw new Error(`readdirp: Invalid type passed. Use one of ${ALL_TYPES.join(", ")}`);
-  }
-  options.root = root;
-  return new ReaddirpStream(options);
-}
-var EntryTypes, defaultOptions2, RECURSIVE_ERROR_CODE, NORMAL_FLOW_ERRORS, ALL_TYPES, DIR_TYPES, FILE_TYPES, isNormalFlowError, wantBigintFsStats, emptyFn, normalizeFilter, ReaddirpStream;
-var init_esm = __esm({
-  "node_modules/readdirp/esm/index.js"() {
-    EntryTypes = {
-      FILE_TYPE: "files",
-      DIR_TYPE: "directories",
-      FILE_DIR_TYPE: "files_directories",
-      EVERYTHING_TYPE: "all"
-    };
-    defaultOptions2 = {
-      root: ".",
-      fileFilter: (_entryInfo) => true,
-      directoryFilter: (_entryInfo) => true,
-      type: EntryTypes.FILE_TYPE,
-      lstat: false,
-      depth: 2147483648,
-      alwaysStat: false,
-      highWaterMark: 4096
-    };
-    Object.freeze(defaultOptions2);
-    RECURSIVE_ERROR_CODE = "READDIRP_RECURSIVE_ERROR";
-    NORMAL_FLOW_ERRORS = /* @__PURE__ */ new Set(["ENOENT", "EPERM", "EACCES", "ELOOP", RECURSIVE_ERROR_CODE]);
-    ALL_TYPES = [
-      EntryTypes.DIR_TYPE,
-      EntryTypes.EVERYTHING_TYPE,
-      EntryTypes.FILE_DIR_TYPE,
-      EntryTypes.FILE_TYPE
-    ];
-    DIR_TYPES = /* @__PURE__ */ new Set([
-      EntryTypes.DIR_TYPE,
-      EntryTypes.EVERYTHING_TYPE,
-      EntryTypes.FILE_DIR_TYPE
-    ]);
-    FILE_TYPES = /* @__PURE__ */ new Set([
-      EntryTypes.EVERYTHING_TYPE,
-      EntryTypes.FILE_DIR_TYPE,
-      EntryTypes.FILE_TYPE
-    ]);
-    isNormalFlowError = (error) => NORMAL_FLOW_ERRORS.has(error.code);
-    wantBigintFsStats = process.platform === "win32";
-    emptyFn = (_entryInfo) => true;
-    normalizeFilter = (filter) => {
-      if (filter === void 0)
-        return emptyFn;
-      if (typeof filter === "function")
-        return filter;
-      if (typeof filter === "string") {
-        const fl = filter.trim();
-        return (entry) => entry.basename === fl;
-      }
-      if (Array.isArray(filter)) {
-        const trItems = filter.map((item) => item.trim());
-        return (entry) => trItems.some((f) => entry.basename === f);
-      }
-      return emptyFn;
-    };
-    ReaddirpStream = class extends Readable {
-      constructor(options = {}) {
-        super({
-          objectMode: true,
-          autoDestroy: true,
-          highWaterMark: options.highWaterMark
-        });
-        const opts = { ...defaultOptions2, ...options };
-        const { root, type } = opts;
-        this._fileFilter = normalizeFilter(opts.fileFilter);
-        this._directoryFilter = normalizeFilter(opts.directoryFilter);
-        const statMethod = opts.lstat ? lstat : stat;
-        if (wantBigintFsStats) {
-          this._stat = (path5) => statMethod(path5, { bigint: true });
-        } else {
-          this._stat = statMethod;
-        }
-        this._maxDepth = opts.depth ?? defaultOptions2.depth;
-        this._wantsDir = type ? DIR_TYPES.has(type) : false;
-        this._wantsFile = type ? FILE_TYPES.has(type) : false;
-        this._wantsEverything = type === EntryTypes.EVERYTHING_TYPE;
-        this._root = presolve(root);
-        this._isDirent = !opts.alwaysStat;
-        this._statsProp = this._isDirent ? "dirent" : "stats";
-        this._rdOptions = { encoding: "utf8", withFileTypes: this._isDirent };
-        this.parents = [this._exploreDir(root, 1)];
-        this.reading = false;
-        this.parent = void 0;
-      }
-      async _read(batch) {
-        if (this.reading)
-          return;
-        this.reading = true;
-        try {
-          while (!this.destroyed && batch > 0) {
-            const par = this.parent;
-            const fil = par && par.files;
-            if (fil && fil.length > 0) {
-              const { path: path5, depth } = par;
-              const slice = fil.splice(0, batch).map((dirent) => this._formatEntry(dirent, path5));
-              const awaited = await Promise.all(slice);
-              for (const entry of awaited) {
-                if (!entry)
-                  continue;
-                if (this.destroyed)
-                  return;
-                const entryType = await this._getEntryType(entry);
-                if (entryType === "directory" && this._directoryFilter(entry)) {
-                  if (depth <= this._maxDepth) {
-                    this.parents.push(this._exploreDir(entry.fullPath, depth + 1));
-                  }
-                  if (this._wantsDir) {
-                    this.push(entry);
-                    batch--;
-                  }
-                } else if ((entryType === "file" || this._includeAsFile(entry)) && this._fileFilter(entry)) {
-                  if (this._wantsFile) {
-                    this.push(entry);
-                    batch--;
-                  }
-                }
-              }
-            } else {
-              const parent = this.parents.pop();
-              if (!parent) {
-                this.push(null);
-                break;
-              }
-              this.parent = await parent;
-              if (this.destroyed)
-                return;
-            }
-          }
-        } catch (error) {
-          this.destroy(error);
-        } finally {
-          this.reading = false;
-        }
-      }
-      async _exploreDir(path5, depth) {
-        let files;
-        try {
-          files = await readdir(path5, this._rdOptions);
-        } catch (error) {
-          this._onError(error);
-        }
-        return { files, depth, path: path5 };
-      }
-      async _formatEntry(dirent, path5) {
-        let entry;
-        const basename3 = this._isDirent ? dirent.name : dirent;
-        try {
-          const fullPath = presolve(pjoin(path5, basename3));
-          entry = { path: prelative(this._root, fullPath), fullPath, basename: basename3 };
-          entry[this._statsProp] = this._isDirent ? dirent : await this._stat(fullPath);
-        } catch (err) {
-          this._onError(err);
-          return;
-        }
-        return entry;
-      }
-      _onError(err) {
-        if (isNormalFlowError(err) && !this.destroyed) {
-          this.emit("warn", err);
-        } else {
-          this.destroy(err);
-        }
-      }
-      async _getEntryType(entry) {
-        if (!entry && this._statsProp in entry) {
-          return "";
-        }
-        const stats = entry[this._statsProp];
-        if (stats.isFile())
-          return "file";
-        if (stats.isDirectory())
-          return "directory";
-        if (stats && stats.isSymbolicLink()) {
-          const full = entry.fullPath;
-          try {
-            const entryRealPath = await realpath(full);
-            const entryRealPathStats = await lstat(entryRealPath);
-            if (entryRealPathStats.isFile()) {
-              return "file";
-            }
-            if (entryRealPathStats.isDirectory()) {
-              const len = entryRealPath.length;
-              if (full.startsWith(entryRealPath) && full.substr(len, 1) === psep) {
-                const recursiveError = new Error(`Circular symlink detected: "${full}" points to "${entryRealPath}"`);
-                recursiveError.code = RECURSIVE_ERROR_CODE;
-                return this._onError(recursiveError);
-              }
-              return "directory";
-            }
-          } catch (error) {
-            this._onError(error);
-            return "";
-          }
-        }
-      }
-      _includeAsFile(entry) {
-        const stats = entry && entry[this._statsProp];
-        return stats && this._wantsEverything && !stats.isDirectory();
-      }
-    };
-  }
-});
-
-// node_modules/chokidar/esm/handler.js
-import { watchFile, unwatchFile, watch as fs_watch } from "fs";
-import { open, stat as stat2, lstat as lstat2, realpath as fsrealpath } from "fs/promises";
-import * as sysPath from "path";
-import { type as osType } from "os";
-function createFsWatchInstance(path5, options, listener, errHandler, emitRaw) {
-  const handleEvent = (rawEvent, evPath) => {
-    listener(path5);
-    emitRaw(rawEvent, evPath, { watchedPath: path5 });
-    if (evPath && path5 !== evPath) {
-      fsWatchBroadcast(sysPath.resolve(path5, evPath), KEY_LISTENERS, sysPath.join(path5, evPath));
-    }
-  };
-  try {
-    return fs_watch(path5, {
-      persistent: options.persistent
-    }, handleEvent);
-  } catch (error) {
-    errHandler(error);
-    return void 0;
-  }
-}
-var STR_DATA, STR_END, STR_CLOSE, EMPTY_FN, pl, isWindows, isMacos, isLinux, isFreeBSD, isIBMi, EVENTS, EV, THROTTLE_MODE_WATCH, statMethods, KEY_LISTENERS, KEY_ERR, KEY_RAW, HANDLER_KEYS, binaryExtensions, isBinaryPath, foreach, addAndConvert, clearItem, delFromSet, isEmptySet, FsWatchInstances, fsWatchBroadcast, setFsWatchListener, FsWatchFileInstances, setFsWatchFileListener, NodeFsHandler;
-var init_handler = __esm({
-  "node_modules/chokidar/esm/handler.js"() {
-    STR_DATA = "data";
-    STR_END = "end";
-    STR_CLOSE = "close";
-    EMPTY_FN = () => {
-    };
-    pl = process.platform;
-    isWindows = pl === "win32";
-    isMacos = pl === "darwin";
-    isLinux = pl === "linux";
-    isFreeBSD = pl === "freebsd";
-    isIBMi = osType() === "OS400";
-    EVENTS = {
-      ALL: "all",
-      READY: "ready",
-      ADD: "add",
-      CHANGE: "change",
-      ADD_DIR: "addDir",
-      UNLINK: "unlink",
-      UNLINK_DIR: "unlinkDir",
-      RAW: "raw",
-      ERROR: "error"
-    };
-    EV = EVENTS;
-    THROTTLE_MODE_WATCH = "watch";
-    statMethods = { lstat: lstat2, stat: stat2 };
-    KEY_LISTENERS = "listeners";
-    KEY_ERR = "errHandlers";
-    KEY_RAW = "rawEmitters";
-    HANDLER_KEYS = [KEY_LISTENERS, KEY_ERR, KEY_RAW];
-    binaryExtensions = /* @__PURE__ */ new Set([
-      "3dm",
-      "3ds",
-      "3g2",
-      "3gp",
-      "7z",
-      "a",
-      "aac",
-      "adp",
-      "afdesign",
-      "afphoto",
-      "afpub",
-      "ai",
-      "aif",
-      "aiff",
-      "alz",
-      "ape",
-      "apk",
-      "appimage",
-      "ar",
-      "arj",
-      "asf",
-      "au",
-      "avi",
-      "bak",
-      "baml",
-      "bh",
-      "bin",
-      "bk",
-      "bmp",
-      "btif",
-      "bz2",
-      "bzip2",
-      "cab",
-      "caf",
-      "cgm",
-      "class",
-      "cmx",
-      "cpio",
-      "cr2",
-      "cur",
-      "dat",
-      "dcm",
-      "deb",
-      "dex",
-      "djvu",
-      "dll",
-      "dmg",
-      "dng",
-      "doc",
-      "docm",
-      "docx",
-      "dot",
-      "dotm",
-      "dra",
-      "DS_Store",
-      "dsk",
-      "dts",
-      "dtshd",
-      "dvb",
-      "dwg",
-      "dxf",
-      "ecelp4800",
-      "ecelp7470",
-      "ecelp9600",
-      "egg",
-      "eol",
-      "eot",
-      "epub",
-      "exe",
-      "f4v",
-      "fbs",
-      "fh",
-      "fla",
-      "flac",
-      "flatpak",
-      "fli",
-      "flv",
-      "fpx",
-      "fst",
-      "fvt",
-      "g3",
-      "gh",
-      "gif",
-      "graffle",
-      "gz",
-      "gzip",
-      "h261",
-      "h263",
-      "h264",
-      "icns",
-      "ico",
-      "ief",
-      "img",
-      "ipa",
-      "iso",
-      "jar",
-      "jpeg",
-      "jpg",
-      "jpgv",
-      "jpm",
-      "jxr",
-      "key",
-      "ktx",
-      "lha",
-      "lib",
-      "lvp",
-      "lz",
-      "lzh",
-      "lzma",
-      "lzo",
-      "m3u",
-      "m4a",
-      "m4v",
-      "mar",
-      "mdi",
-      "mht",
-      "mid",
-      "midi",
-      "mj2",
-      "mka",
-      "mkv",
-      "mmr",
-      "mng",
-      "mobi",
-      "mov",
-      "movie",
-      "mp3",
-      "mp4",
-      "mp4a",
-      "mpeg",
-      "mpg",
-      "mpga",
-      "mxu",
-      "nef",
-      "npx",
-      "numbers",
-      "nupkg",
-      "o",
-      "odp",
-      "ods",
-      "odt",
-      "oga",
-      "ogg",
-      "ogv",
-      "otf",
-      "ott",
-      "pages",
-      "pbm",
-      "pcx",
-      "pdb",
-      "pdf",
-      "pea",
-      "pgm",
-      "pic",
-      "png",
-      "pnm",
-      "pot",
-      "potm",
-      "potx",
-      "ppa",
-      "ppam",
-      "ppm",
-      "pps",
-      "ppsm",
-      "ppsx",
-      "ppt",
-      "pptm",
-      "pptx",
-      "psd",
-      "pya",
-      "pyc",
-      "pyo",
-      "pyv",
-      "qt",
-      "rar",
-      "ras",
-      "raw",
-      "resources",
-      "rgb",
-      "rip",
-      "rlc",
-      "rmf",
-      "rmvb",
-      "rpm",
-      "rtf",
-      "rz",
-      "s3m",
-      "s7z",
-      "scpt",
-      "sgi",
-      "shar",
-      "snap",
-      "sil",
-      "sketch",
-      "slk",
-      "smv",
-      "snk",
-      "so",
-      "stl",
-      "suo",
-      "sub",
-      "swf",
-      "tar",
-      "tbz",
-      "tbz2",
-      "tga",
-      "tgz",
-      "thmx",
-      "tif",
-      "tiff",
-      "tlz",
-      "ttc",
-      "ttf",
-      "txz",
-      "udf",
-      "uvh",
-      "uvi",
-      "uvm",
-      "uvp",
-      "uvs",
-      "uvu",
-      "viv",
-      "vob",
-      "war",
-      "wav",
-      "wax",
-      "wbmp",
-      "wdp",
-      "weba",
-      "webm",
-      "webp",
-      "whl",
-      "wim",
-      "wm",
-      "wma",
-      "wmv",
-      "wmx",
-      "woff",
-      "woff2",
-      "wrm",
-      "wvx",
-      "xbm",
-      "xif",
-      "xla",
-      "xlam",
-      "xls",
-      "xlsb",
-      "xlsm",
-      "xlsx",
-      "xlt",
-      "xltm",
-      "xltx",
-      "xm",
-      "xmind",
-      "xpi",
-      "xpm",
-      "xwd",
-      "xz",
-      "z",
-      "zip",
-      "zipx"
-    ]);
-    isBinaryPath = (filePath) => binaryExtensions.has(sysPath.extname(filePath).slice(1).toLowerCase());
-    foreach = (val, fn) => {
-      if (val instanceof Set) {
-        val.forEach(fn);
-      } else {
-        fn(val);
-      }
-    };
-    addAndConvert = (main2, prop, item) => {
-      let container = main2[prop];
-      if (!(container instanceof Set)) {
-        main2[prop] = container = /* @__PURE__ */ new Set([container]);
-      }
-      container.add(item);
-    };
-    clearItem = (cont) => (key) => {
-      const set = cont[key];
-      if (set instanceof Set) {
-        set.clear();
-      } else {
-        delete cont[key];
-      }
-    };
-    delFromSet = (main2, prop, item) => {
-      const container = main2[prop];
-      if (container instanceof Set) {
-        container.delete(item);
-      } else if (container === item) {
-        delete main2[prop];
-      }
-    };
-    isEmptySet = (val) => val instanceof Set ? val.size === 0 : !val;
-    FsWatchInstances = /* @__PURE__ */ new Map();
-    fsWatchBroadcast = (fullPath, listenerType, val1, val2, val3) => {
-      const cont = FsWatchInstances.get(fullPath);
-      if (!cont)
-        return;
-      foreach(cont[listenerType], (listener) => {
-        listener(val1, val2, val3);
-      });
-    };
-    setFsWatchListener = (path5, fullPath, options, handlers) => {
-      const { listener, errHandler, rawEmitter } = handlers;
-      let cont = FsWatchInstances.get(fullPath);
-      let watcher;
-      if (!options.persistent) {
-        watcher = createFsWatchInstance(path5, options, listener, errHandler, rawEmitter);
-        if (!watcher)
-          return;
-        return watcher.close.bind(watcher);
-      }
-      if (cont) {
-        addAndConvert(cont, KEY_LISTENERS, listener);
-        addAndConvert(cont, KEY_ERR, errHandler);
-        addAndConvert(cont, KEY_RAW, rawEmitter);
-      } else {
-        watcher = createFsWatchInstance(
-          path5,
-          options,
-          fsWatchBroadcast.bind(null, fullPath, KEY_LISTENERS),
-          errHandler,
-          // no need to use broadcast here
-          fsWatchBroadcast.bind(null, fullPath, KEY_RAW)
-        );
-        if (!watcher)
-          return;
-        watcher.on(EV.ERROR, async (error) => {
-          const broadcastErr = fsWatchBroadcast.bind(null, fullPath, KEY_ERR);
-          if (cont)
-            cont.watcherUnusable = true;
-          if (isWindows && error.code === "EPERM") {
-            try {
-              const fd = await open(path5, "r");
-              await fd.close();
-              broadcastErr(error);
-            } catch (err) {
-            }
-          } else {
-            broadcastErr(error);
-          }
-        });
-        cont = {
-          listeners: listener,
-          errHandlers: errHandler,
-          rawEmitters: rawEmitter,
-          watcher
-        };
-        FsWatchInstances.set(fullPath, cont);
-      }
-      return () => {
-        delFromSet(cont, KEY_LISTENERS, listener);
-        delFromSet(cont, KEY_ERR, errHandler);
-        delFromSet(cont, KEY_RAW, rawEmitter);
-        if (isEmptySet(cont.listeners)) {
-          cont.watcher.close();
-          FsWatchInstances.delete(fullPath);
-          HANDLER_KEYS.forEach(clearItem(cont));
-          cont.watcher = void 0;
-          Object.freeze(cont);
-        }
-      };
-    };
-    FsWatchFileInstances = /* @__PURE__ */ new Map();
-    setFsWatchFileListener = (path5, fullPath, options, handlers) => {
-      const { listener, rawEmitter } = handlers;
-      let cont = FsWatchFileInstances.get(fullPath);
-      const copts = cont && cont.options;
-      if (copts && (copts.persistent < options.persistent || copts.interval > options.interval)) {
-        unwatchFile(fullPath);
-        cont = void 0;
-      }
-      if (cont) {
-        addAndConvert(cont, KEY_LISTENERS, listener);
-        addAndConvert(cont, KEY_RAW, rawEmitter);
-      } else {
-        cont = {
-          listeners: listener,
-          rawEmitters: rawEmitter,
-          options,
-          watcher: watchFile(fullPath, options, (curr, prev) => {
-            foreach(cont.rawEmitters, (rawEmitter2) => {
-              rawEmitter2(EV.CHANGE, fullPath, { curr, prev });
-            });
-            const currmtime = curr.mtimeMs;
-            if (curr.size !== prev.size || currmtime > prev.mtimeMs || currmtime === 0) {
-              foreach(cont.listeners, (listener2) => listener2(path5, curr));
-            }
-          })
-        };
-        FsWatchFileInstances.set(fullPath, cont);
-      }
-      return () => {
-        delFromSet(cont, KEY_LISTENERS, listener);
-        delFromSet(cont, KEY_RAW, rawEmitter);
-        if (isEmptySet(cont.listeners)) {
-          FsWatchFileInstances.delete(fullPath);
-          unwatchFile(fullPath);
-          cont.options = cont.watcher = void 0;
-          Object.freeze(cont);
-        }
-      };
-    };
-    NodeFsHandler = class {
-      constructor(fsW) {
-        this.fsw = fsW;
-        this._boundHandleError = (error) => fsW._handleError(error);
-      }
-      /**
-       * Watch file for changes with fs_watchFile or fs_watch.
-       * @param path to file or dir
-       * @param listener on fs change
-       * @returns closer for the watcher instance
-       */
-      _watchWithNodeFs(path5, listener) {
-        const opts = this.fsw.options;
-        const directory = sysPath.dirname(path5);
-        const basename3 = sysPath.basename(path5);
-        const parent = this.fsw._getWatchedDir(directory);
-        parent.add(basename3);
-        const absolutePath = sysPath.resolve(path5);
-        const options = {
-          persistent: opts.persistent
-        };
-        if (!listener)
-          listener = EMPTY_FN;
-        let closer;
-        if (opts.usePolling) {
-          const enableBin = opts.interval !== opts.binaryInterval;
-          options.interval = enableBin && isBinaryPath(basename3) ? opts.binaryInterval : opts.interval;
-          closer = setFsWatchFileListener(path5, absolutePath, options, {
-            listener,
-            rawEmitter: this.fsw._emitRaw
-          });
-        } else {
-          closer = setFsWatchListener(path5, absolutePath, options, {
-            listener,
-            errHandler: this._boundHandleError,
-            rawEmitter: this.fsw._emitRaw
-          });
-        }
-        return closer;
-      }
-      /**
-       * Watch a file and emit add event if warranted.
-       * @returns closer for the watcher instance
-       */
-      _handleFile(file, stats, initialAdd) {
-        if (this.fsw.closed) {
-          return;
-        }
-        const dirname3 = sysPath.dirname(file);
-        const basename3 = sysPath.basename(file);
-        const parent = this.fsw._getWatchedDir(dirname3);
-        let prevStats = stats;
-        if (parent.has(basename3))
-          return;
-        const listener = async (path5, newStats) => {
-          if (!this.fsw._throttle(THROTTLE_MODE_WATCH, file, 5))
-            return;
-          if (!newStats || newStats.mtimeMs === 0) {
-            try {
-              const newStats2 = await stat2(file);
-              if (this.fsw.closed)
-                return;
-              const at2 = newStats2.atimeMs;
-              const mt = newStats2.mtimeMs;
-              if (!at2 || at2 <= mt || mt !== prevStats.mtimeMs) {
-                this.fsw._emit(EV.CHANGE, file, newStats2);
-              }
-              if ((isMacos || isLinux || isFreeBSD) && prevStats.ino !== newStats2.ino) {
-                this.fsw._closeFile(path5);
-                prevStats = newStats2;
-                const closer2 = this._watchWithNodeFs(file, listener);
-                if (closer2)
-                  this.fsw._addPathCloser(path5, closer2);
-              } else {
-                prevStats = newStats2;
-              }
-            } catch (error) {
-              this.fsw._remove(dirname3, basename3);
-            }
-          } else if (parent.has(basename3)) {
-            const at2 = newStats.atimeMs;
-            const mt = newStats.mtimeMs;
-            if (!at2 || at2 <= mt || mt !== prevStats.mtimeMs) {
-              this.fsw._emit(EV.CHANGE, file, newStats);
-            }
-            prevStats = newStats;
-          }
-        };
-        const closer = this._watchWithNodeFs(file, listener);
-        if (!(initialAdd && this.fsw.options.ignoreInitial) && this.fsw._isntIgnored(file)) {
-          if (!this.fsw._throttle(EV.ADD, file, 0))
-            return;
-          this.fsw._emit(EV.ADD, file, stats);
-        }
-        return closer;
-      }
-      /**
-       * Handle symlinks encountered while reading a dir.
-       * @param entry returned by readdirp
-       * @param directory path of dir being read
-       * @param path of this item
-       * @param item basename of this item
-       * @returns true if no more processing is needed for this entry.
-       */
-      async _handleSymlink(entry, directory, path5, item) {
-        if (this.fsw.closed) {
-          return;
-        }
-        const full = entry.fullPath;
-        const dir = this.fsw._getWatchedDir(directory);
-        if (!this.fsw.options.followSymlinks) {
-          this.fsw._incrReadyCount();
-          let linkPath;
-          try {
-            linkPath = await fsrealpath(path5);
-          } catch (e) {
-            this.fsw._emitReady();
-            return true;
-          }
-          if (this.fsw.closed)
-            return;
-          if (dir.has(item)) {
-            if (this.fsw._symlinkPaths.get(full) !== linkPath) {
-              this.fsw._symlinkPaths.set(full, linkPath);
-              this.fsw._emit(EV.CHANGE, path5, entry.stats);
-            }
-          } else {
-            dir.add(item);
-            this.fsw._symlinkPaths.set(full, linkPath);
-            this.fsw._emit(EV.ADD, path5, entry.stats);
-          }
-          this.fsw._emitReady();
-          return true;
-        }
-        if (this.fsw._symlinkPaths.has(full)) {
-          return true;
-        }
-        this.fsw._symlinkPaths.set(full, true);
-      }
-      _handleRead(directory, initialAdd, wh, target, dir, depth, throttler) {
-        directory = sysPath.join(directory, "");
-        throttler = this.fsw._throttle("readdir", directory, 1e3);
-        if (!throttler)
-          return;
-        const previous = this.fsw._getWatchedDir(wh.path);
-        const current2 = /* @__PURE__ */ new Set();
-        let stream = this.fsw._readdirp(directory, {
-          fileFilter: (entry) => wh.filterPath(entry),
-          directoryFilter: (entry) => wh.filterDir(entry)
-        });
-        if (!stream)
-          return;
-        stream.on(STR_DATA, async (entry) => {
-          if (this.fsw.closed) {
-            stream = void 0;
-            return;
-          }
-          const item = entry.path;
-          let path5 = sysPath.join(directory, item);
-          current2.add(item);
-          if (entry.stats.isSymbolicLink() && await this._handleSymlink(entry, directory, path5, item)) {
-            return;
-          }
-          if (this.fsw.closed) {
-            stream = void 0;
-            return;
-          }
-          if (item === target || !target && !previous.has(item)) {
-            this.fsw._incrReadyCount();
-            path5 = sysPath.join(dir, sysPath.relative(dir, path5));
-            this._addToNodeFs(path5, initialAdd, wh, depth + 1);
-          }
-        }).on(EV.ERROR, this._boundHandleError);
-        return new Promise((resolve3, reject) => {
-          if (!stream)
-            return reject();
-          stream.once(STR_END, () => {
-            if (this.fsw.closed) {
-              stream = void 0;
-              return;
-            }
-            const wasThrottled = throttler ? throttler.clear() : false;
-            resolve3(void 0);
-            previous.getChildren().filter((item) => {
-              return item !== directory && !current2.has(item);
-            }).forEach((item) => {
-              this.fsw._remove(directory, item);
-            });
-            stream = void 0;
-            if (wasThrottled)
-              this._handleRead(directory, false, wh, target, dir, depth, throttler);
-          });
-        });
-      }
-      /**
-       * Read directory to add / remove files from `@watched` list and re-read it on change.
-       * @param dir fs path
-       * @param stats
-       * @param initialAdd
-       * @param depth relative to user-supplied path
-       * @param target child path targeted for watch
-       * @param wh Common watch helpers for this path
-       * @param realpath
-       * @returns closer for the watcher instance.
-       */
-      async _handleDir(dir, stats, initialAdd, depth, target, wh, realpath2) {
-        const parentDir = this.fsw._getWatchedDir(sysPath.dirname(dir));
-        const tracked = parentDir.has(sysPath.basename(dir));
-        if (!(initialAdd && this.fsw.options.ignoreInitial) && !target && !tracked) {
-          this.fsw._emit(EV.ADD_DIR, dir, stats);
-        }
-        parentDir.add(sysPath.basename(dir));
-        this.fsw._getWatchedDir(dir);
-        let throttler;
-        let closer;
-        const oDepth = this.fsw.options.depth;
-        if ((oDepth == null || depth <= oDepth) && !this.fsw._symlinkPaths.has(realpath2)) {
-          if (!target) {
-            await this._handleRead(dir, initialAdd, wh, target, dir, depth, throttler);
-            if (this.fsw.closed)
-              return;
-          }
-          closer = this._watchWithNodeFs(dir, (dirPath, stats2) => {
-            if (stats2 && stats2.mtimeMs === 0)
-              return;
-            this._handleRead(dirPath, false, wh, target, dir, depth, throttler);
-          });
-        }
-        return closer;
-      }
-      /**
-       * Handle added file, directory, or glob pattern.
-       * Delegates call to _handleFile / _handleDir after checks.
-       * @param path to file or ir
-       * @param initialAdd was the file added at watch instantiation?
-       * @param priorWh depth relative to user-supplied path
-       * @param depth Child path actually targeted for watch
-       * @param target Child path actually targeted for watch
-       */
-      async _addToNodeFs(path5, initialAdd, priorWh, depth, target) {
-        const ready = this.fsw._emitReady;
-        if (this.fsw._isIgnored(path5) || this.fsw.closed) {
-          ready();
-          return false;
-        }
-        const wh = this.fsw._getWatchHelpers(path5);
-        if (priorWh) {
-          wh.filterPath = (entry) => priorWh.filterPath(entry);
-          wh.filterDir = (entry) => priorWh.filterDir(entry);
-        }
-        try {
-          const stats = await statMethods[wh.statMethod](wh.watchPath);
-          if (this.fsw.closed)
-            return;
-          if (this.fsw._isIgnored(wh.watchPath, stats)) {
-            ready();
-            return false;
-          }
-          const follow = this.fsw.options.followSymlinks;
-          let closer;
-          if (stats.isDirectory()) {
-            const absPath = sysPath.resolve(path5);
-            const targetPath = follow ? await fsrealpath(path5) : path5;
-            if (this.fsw.closed)
-              return;
-            closer = await this._handleDir(wh.watchPath, stats, initialAdd, depth, target, wh, targetPath);
-            if (this.fsw.closed)
-              return;
-            if (absPath !== targetPath && targetPath !== void 0) {
-              this.fsw._symlinkPaths.set(absPath, targetPath);
-            }
-          } else if (stats.isSymbolicLink()) {
-            const targetPath = follow ? await fsrealpath(path5) : path5;
-            if (this.fsw.closed)
-              return;
-            const parent = sysPath.dirname(wh.watchPath);
-            this.fsw._getWatchedDir(parent).add(wh.watchPath);
-            this.fsw._emit(EV.ADD, wh.watchPath, stats);
-            closer = await this._handleDir(parent, stats, initialAdd, depth, path5, wh, targetPath);
-            if (this.fsw.closed)
-              return;
-            if (targetPath !== void 0) {
-              this.fsw._symlinkPaths.set(sysPath.resolve(path5), targetPath);
-            }
-          } else {
-            closer = this._handleFile(wh.watchPath, stats, initialAdd);
-          }
-          ready();
-          if (closer)
-            this.fsw._addPathCloser(path5, closer);
-          return false;
-        } catch (error) {
-          if (this.fsw._handleError(error)) {
-            ready();
-            return path5;
-          }
-        }
-      }
-    };
-  }
-});
-
-// node_modules/chokidar/esm/index.js
-var esm_exports = {};
-__export(esm_exports, {
-  FSWatcher: () => FSWatcher,
-  WatchHelper: () => WatchHelper,
-  default: () => esm_default,
-  watch: () => watch
-});
-import { stat as statcb } from "fs";
-import { stat as stat3, readdir as readdir2 } from "fs/promises";
-import { EventEmitter } from "events";
-import * as sysPath2 from "path";
-function arrify(item) {
-  return Array.isArray(item) ? item : [item];
-}
-function createPattern(matcher) {
-  if (typeof matcher === "function")
-    return matcher;
-  if (typeof matcher === "string")
-    return (string) => matcher === string;
-  if (matcher instanceof RegExp)
-    return (string) => matcher.test(string);
-  if (typeof matcher === "object" && matcher !== null) {
-    return (string) => {
-      if (matcher.path === string)
-        return true;
-      if (matcher.recursive) {
-        const relative3 = sysPath2.relative(matcher.path, string);
-        if (!relative3) {
-          return false;
-        }
-        return !relative3.startsWith("..") && !sysPath2.isAbsolute(relative3);
-      }
-      return false;
-    };
-  }
-  return () => false;
-}
-function normalizePath(path5) {
-  if (typeof path5 !== "string")
-    throw new Error("string expected");
-  path5 = sysPath2.normalize(path5);
-  path5 = path5.replace(/\\/g, "/");
-  let prepend = false;
-  if (path5.startsWith("//"))
-    prepend = true;
-  const DOUBLE_SLASH_RE2 = /\/\//;
-  while (path5.match(DOUBLE_SLASH_RE2))
-    path5 = path5.replace(DOUBLE_SLASH_RE2, "/");
-  if (prepend)
-    path5 = "/" + path5;
-  return path5;
-}
-function matchPatterns(patterns, testString, stats) {
-  const path5 = normalizePath(testString);
-  for (let index = 0; index < patterns.length; index++) {
-    const pattern = patterns[index];
-    if (pattern(path5, stats)) {
-      return true;
-    }
-  }
-  return false;
-}
-function anymatch(matchers, testString) {
-  if (matchers == null) {
-    throw new TypeError("anymatch: specify first argument");
-  }
-  const matchersArray = arrify(matchers);
-  const patterns = matchersArray.map((matcher) => createPattern(matcher));
-  if (testString == null) {
-    return (testString2, stats) => {
-      return matchPatterns(patterns, testString2, stats);
-    };
-  }
-  return matchPatterns(patterns, testString);
-}
-function watch(paths, options = {}) {
-  const watcher = new FSWatcher(options);
-  watcher.add(paths);
-  return watcher;
-}
-var SLASH, SLASH_SLASH, ONE_DOT, TWO_DOTS, STRING_TYPE, BACK_SLASH_RE, DOUBLE_SLASH_RE, DOT_RE, REPLACER_RE, isMatcherObject, unifyPaths, toUnix, normalizePathToUnix, normalizeIgnored, getAbsolutePath, EMPTY_SET, DirEntry, STAT_METHOD_F, STAT_METHOD_L, WatchHelper, FSWatcher, esm_default;
-var init_esm2 = __esm({
-  "node_modules/chokidar/esm/index.js"() {
-    init_esm();
-    init_handler();
-    SLASH = "/";
-    SLASH_SLASH = "//";
-    ONE_DOT = ".";
-    TWO_DOTS = "..";
-    STRING_TYPE = "string";
-    BACK_SLASH_RE = /\\/g;
-    DOUBLE_SLASH_RE = /\/\//;
-    DOT_RE = /\..*\.(sw[px])$|~$|\.subl.*\.tmp/;
-    REPLACER_RE = /^\.[/\\]/;
-    isMatcherObject = (matcher) => typeof matcher === "object" && matcher !== null && !(matcher instanceof RegExp);
-    unifyPaths = (paths_) => {
-      const paths = arrify(paths_).flat();
-      if (!paths.every((p) => typeof p === STRING_TYPE)) {
-        throw new TypeError(`Non-string provided as watch path: ${paths}`);
-      }
-      return paths.map(normalizePathToUnix);
-    };
-    toUnix = (string) => {
-      let str = string.replace(BACK_SLASH_RE, SLASH);
-      let prepend = false;
-      if (str.startsWith(SLASH_SLASH)) {
-        prepend = true;
-      }
-      while (str.match(DOUBLE_SLASH_RE)) {
-        str = str.replace(DOUBLE_SLASH_RE, SLASH);
-      }
-      if (prepend) {
-        str = SLASH + str;
-      }
-      return str;
-    };
-    normalizePathToUnix = (path5) => toUnix(sysPath2.normalize(toUnix(path5)));
-    normalizeIgnored = (cwd = "") => (path5) => {
-      if (typeof path5 === "string") {
-        return normalizePathToUnix(sysPath2.isAbsolute(path5) ? path5 : sysPath2.join(cwd, path5));
-      } else {
-        return path5;
-      }
-    };
-    getAbsolutePath = (path5, cwd) => {
-      if (sysPath2.isAbsolute(path5)) {
-        return path5;
-      }
-      return sysPath2.join(cwd, path5);
-    };
-    EMPTY_SET = Object.freeze(/* @__PURE__ */ new Set());
-    DirEntry = class {
-      constructor(dir, removeWatcher) {
-        this.path = dir;
-        this._removeWatcher = removeWatcher;
-        this.items = /* @__PURE__ */ new Set();
-      }
-      add(item) {
-        const { items } = this;
-        if (!items)
-          return;
-        if (item !== ONE_DOT && item !== TWO_DOTS)
-          items.add(item);
-      }
-      async remove(item) {
-        const { items } = this;
-        if (!items)
-          return;
-        items.delete(item);
-        if (items.size > 0)
-          return;
-        const dir = this.path;
-        try {
-          await readdir2(dir);
-        } catch (err) {
-          if (this._removeWatcher) {
-            this._removeWatcher(sysPath2.dirname(dir), sysPath2.basename(dir));
-          }
-        }
-      }
-      has(item) {
-        const { items } = this;
-        if (!items)
-          return;
-        return items.has(item);
-      }
-      getChildren() {
-        const { items } = this;
-        if (!items)
-          return [];
-        return [...items.values()];
-      }
-      dispose() {
-        this.items.clear();
-        this.path = "";
-        this._removeWatcher = EMPTY_FN;
-        this.items = EMPTY_SET;
-        Object.freeze(this);
-      }
-    };
-    STAT_METHOD_F = "stat";
-    STAT_METHOD_L = "lstat";
-    WatchHelper = class {
-      constructor(path5, follow, fsw) {
-        this.fsw = fsw;
-        const watchPath = path5;
-        this.path = path5 = path5.replace(REPLACER_RE, "");
-        this.watchPath = watchPath;
-        this.fullWatchPath = sysPath2.resolve(watchPath);
-        this.dirParts = [];
-        this.dirParts.forEach((parts) => {
-          if (parts.length > 1)
-            parts.pop();
-        });
-        this.followSymlinks = follow;
-        this.statMethod = follow ? STAT_METHOD_F : STAT_METHOD_L;
-      }
-      entryPath(entry) {
-        return sysPath2.join(this.watchPath, sysPath2.relative(this.watchPath, entry.fullPath));
-      }
-      filterPath(entry) {
-        const { stats } = entry;
-        if (stats && stats.isSymbolicLink())
-          return this.filterDir(entry);
-        const resolvedPath = this.entryPath(entry);
-        return this.fsw._isntIgnored(resolvedPath, stats) && this.fsw._hasReadPermissions(stats);
-      }
-      filterDir(entry) {
-        return this.fsw._isntIgnored(this.entryPath(entry), entry.stats);
-      }
-    };
-    FSWatcher = class extends EventEmitter {
-      // Not indenting methods for history sake; for now.
-      constructor(_opts = {}) {
-        super();
-        this.closed = false;
-        this._closers = /* @__PURE__ */ new Map();
-        this._ignoredPaths = /* @__PURE__ */ new Set();
-        this._throttled = /* @__PURE__ */ new Map();
-        this._streams = /* @__PURE__ */ new Set();
-        this._symlinkPaths = /* @__PURE__ */ new Map();
-        this._watched = /* @__PURE__ */ new Map();
-        this._pendingWrites = /* @__PURE__ */ new Map();
-        this._pendingUnlinks = /* @__PURE__ */ new Map();
-        this._readyCount = 0;
-        this._readyEmitted = false;
-        const awf = _opts.awaitWriteFinish;
-        const DEF_AWF = { stabilityThreshold: 2e3, pollInterval: 100 };
-        const opts = {
-          // Defaults
-          persistent: true,
-          ignoreInitial: false,
-          ignorePermissionErrors: false,
-          interval: 100,
-          binaryInterval: 300,
-          followSymlinks: true,
-          usePolling: false,
-          // useAsync: false,
-          atomic: true,
-          // NOTE: overwritten later (depends on usePolling)
-          ..._opts,
-          // Change format
-          ignored: _opts.ignored ? arrify(_opts.ignored) : arrify([]),
-          awaitWriteFinish: awf === true ? DEF_AWF : typeof awf === "object" ? { ...DEF_AWF, ...awf } : false
-        };
-        if (isIBMi)
-          opts.usePolling = true;
-        if (opts.atomic === void 0)
-          opts.atomic = !opts.usePolling;
-        const envPoll = process.env.CHOKIDAR_USEPOLLING;
-        if (envPoll !== void 0) {
-          const envLower = envPoll.toLowerCase();
-          if (envLower === "false" || envLower === "0")
-            opts.usePolling = false;
-          else if (envLower === "true" || envLower === "1")
-            opts.usePolling = true;
-          else
-            opts.usePolling = !!envLower;
-        }
-        const envInterval = process.env.CHOKIDAR_INTERVAL;
-        if (envInterval)
-          opts.interval = Number.parseInt(envInterval, 10);
-        let readyCalls = 0;
-        this._emitReady = () => {
-          readyCalls++;
-          if (readyCalls >= this._readyCount) {
-            this._emitReady = EMPTY_FN;
-            this._readyEmitted = true;
-            process.nextTick(() => this.emit(EVENTS.READY));
-          }
-        };
-        this._emitRaw = (...args) => this.emit(EVENTS.RAW, ...args);
-        this._boundRemove = this._remove.bind(this);
-        this.options = opts;
-        this._nodeFsHandler = new NodeFsHandler(this);
-        Object.freeze(opts);
-      }
-      _addIgnoredPath(matcher) {
-        if (isMatcherObject(matcher)) {
-          for (const ignored of this._ignoredPaths) {
-            if (isMatcherObject(ignored) && ignored.path === matcher.path && ignored.recursive === matcher.recursive) {
-              return;
-            }
-          }
-        }
-        this._ignoredPaths.add(matcher);
-      }
-      _removeIgnoredPath(matcher) {
-        this._ignoredPaths.delete(matcher);
-        if (typeof matcher === "string") {
-          for (const ignored of this._ignoredPaths) {
-            if (isMatcherObject(ignored) && ignored.path === matcher) {
-              this._ignoredPaths.delete(ignored);
-            }
-          }
-        }
-      }
-      // Public methods
-      /**
-       * Adds paths to be watched on an existing FSWatcher instance.
-       * @param paths_ file or file list. Other arguments are unused
-       */
-      add(paths_, _origAdd, _internal) {
-        const { cwd } = this.options;
-        this.closed = false;
-        this._closePromise = void 0;
-        let paths = unifyPaths(paths_);
-        if (cwd) {
-          paths = paths.map((path5) => {
-            const absPath = getAbsolutePath(path5, cwd);
-            return absPath;
-          });
-        }
-        paths.forEach((path5) => {
-          this._removeIgnoredPath(path5);
-        });
-        this._userIgnored = void 0;
-        if (!this._readyCount)
-          this._readyCount = 0;
-        this._readyCount += paths.length;
-        Promise.all(paths.map(async (path5) => {
-          const res = await this._nodeFsHandler._addToNodeFs(path5, !_internal, void 0, 0, _origAdd);
-          if (res)
-            this._emitReady();
-          return res;
-        })).then((results) => {
-          if (this.closed)
-            return;
-          results.forEach((item) => {
-            if (item)
-              this.add(sysPath2.dirname(item), sysPath2.basename(_origAdd || item));
-          });
-        });
-        return this;
-      }
-      /**
-       * Close watchers or start ignoring events from specified paths.
-       */
-      unwatch(paths_) {
-        if (this.closed)
-          return this;
-        const paths = unifyPaths(paths_);
-        const { cwd } = this.options;
-        paths.forEach((path5) => {
-          if (!sysPath2.isAbsolute(path5) && !this._closers.has(path5)) {
-            if (cwd)
-              path5 = sysPath2.join(cwd, path5);
-            path5 = sysPath2.resolve(path5);
-          }
-          this._closePath(path5);
-          this._addIgnoredPath(path5);
-          if (this._watched.has(path5)) {
-            this._addIgnoredPath({
-              path: path5,
-              recursive: true
-            });
-          }
-          this._userIgnored = void 0;
-        });
-        return this;
-      }
-      /**
-       * Close watchers and remove all listeners from watched paths.
-       */
-      close() {
-        if (this._closePromise) {
-          return this._closePromise;
-        }
-        this.closed = true;
-        this.removeAllListeners();
-        const closers = [];
-        this._closers.forEach((closerList) => closerList.forEach((closer) => {
-          const promise = closer();
-          if (promise instanceof Promise)
-            closers.push(promise);
-        }));
-        this._streams.forEach((stream) => stream.destroy());
-        this._userIgnored = void 0;
-        this._readyCount = 0;
-        this._readyEmitted = false;
-        this._watched.forEach((dirent) => dirent.dispose());
-        this._closers.clear();
-        this._watched.clear();
-        this._streams.clear();
-        this._symlinkPaths.clear();
-        this._throttled.clear();
-        this._closePromise = closers.length ? Promise.all(closers).then(() => void 0) : Promise.resolve();
-        return this._closePromise;
-      }
-      /**
-       * Expose list of watched paths
-       * @returns for chaining
-       */
-      getWatched() {
-        const watchList = {};
-        this._watched.forEach((entry, dir) => {
-          const key = this.options.cwd ? sysPath2.relative(this.options.cwd, dir) : dir;
-          const index = key || ONE_DOT;
-          watchList[index] = entry.getChildren().sort();
-        });
-        return watchList;
-      }
-      emitWithAll(event, args) {
-        this.emit(event, ...args);
-        if (event !== EVENTS.ERROR)
-          this.emit(EVENTS.ALL, event, ...args);
-      }
-      // Common helpers
-      // --------------
-      /**
-       * Normalize and emit events.
-       * Calling _emit DOES NOT MEAN emit() would be called!
-       * @param event Type of event
-       * @param path File or directory path
-       * @param stats arguments to be passed with event
-       * @returns the error if defined, otherwise the value of the FSWatcher instance's `closed` flag
-       */
-      async _emit(event, path5, stats) {
-        if (this.closed)
-          return;
-        const opts = this.options;
-        if (isWindows)
-          path5 = sysPath2.normalize(path5);
-        if (opts.cwd)
-          path5 = sysPath2.relative(opts.cwd, path5);
-        const args = [path5];
-        if (stats != null)
-          args.push(stats);
-        const awf = opts.awaitWriteFinish;
-        let pw;
-        if (awf && (pw = this._pendingWrites.get(path5))) {
-          pw.lastChange = /* @__PURE__ */ new Date();
-          return this;
-        }
-        if (opts.atomic) {
-          if (event === EVENTS.UNLINK) {
-            this._pendingUnlinks.set(path5, [event, ...args]);
-            setTimeout(() => {
-              this._pendingUnlinks.forEach((entry, path6) => {
-                this.emit(...entry);
-                this.emit(EVENTS.ALL, ...entry);
-                this._pendingUnlinks.delete(path6);
-              });
-            }, typeof opts.atomic === "number" ? opts.atomic : 100);
-            return this;
-          }
-          if (event === EVENTS.ADD && this._pendingUnlinks.has(path5)) {
-            event = EVENTS.CHANGE;
-            this._pendingUnlinks.delete(path5);
-          }
-        }
-        if (awf && (event === EVENTS.ADD || event === EVENTS.CHANGE) && this._readyEmitted) {
-          const awfEmit = (err, stats2) => {
-            if (err) {
-              event = EVENTS.ERROR;
-              args[0] = err;
-              this.emitWithAll(event, args);
-            } else if (stats2) {
-              if (args.length > 1) {
-                args[1] = stats2;
-              } else {
-                args.push(stats2);
-              }
-              this.emitWithAll(event, args);
-            }
-          };
-          this._awaitWriteFinish(path5, awf.stabilityThreshold, event, awfEmit);
-          return this;
-        }
-        if (event === EVENTS.CHANGE) {
-          const isThrottled = !this._throttle(EVENTS.CHANGE, path5, 50);
-          if (isThrottled)
-            return this;
-        }
-        if (opts.alwaysStat && stats === void 0 && (event === EVENTS.ADD || event === EVENTS.ADD_DIR || event === EVENTS.CHANGE)) {
-          const fullPath = opts.cwd ? sysPath2.join(opts.cwd, path5) : path5;
-          let stats2;
-          try {
-            stats2 = await stat3(fullPath);
-          } catch (err) {
-          }
-          if (!stats2 || this.closed)
-            return;
-          args.push(stats2);
-        }
-        this.emitWithAll(event, args);
-        return this;
-      }
-      /**
-       * Common handler for errors
-       * @returns The error if defined, otherwise the value of the FSWatcher instance's `closed` flag
-       */
-      _handleError(error) {
-        const code = error && error.code;
-        if (error && code !== "ENOENT" && code !== "ENOTDIR" && (!this.options.ignorePermissionErrors || code !== "EPERM" && code !== "EACCES")) {
-          this.emit(EVENTS.ERROR, error);
-        }
-        return error || this.closed;
-      }
-      /**
-       * Helper utility for throttling
-       * @param actionType type being throttled
-       * @param path being acted upon
-       * @param timeout duration of time to suppress duplicate actions
-       * @returns tracking object or false if action should be suppressed
-       */
-      _throttle(actionType, path5, timeout) {
-        if (!this._throttled.has(actionType)) {
-          this._throttled.set(actionType, /* @__PURE__ */ new Map());
-        }
-        const action = this._throttled.get(actionType);
-        if (!action)
-          throw new Error("invalid throttle");
-        const actionPath = action.get(path5);
-        if (actionPath) {
-          actionPath.count++;
-          return false;
-        }
-        let timeoutObject;
-        const clear = () => {
-          const item = action.get(path5);
-          const count = item ? item.count : 0;
-          action.delete(path5);
-          clearTimeout(timeoutObject);
-          if (item)
-            clearTimeout(item.timeoutObject);
-          return count;
-        };
-        timeoutObject = setTimeout(clear, timeout);
-        const thr = { timeoutObject, clear, count: 0 };
-        action.set(path5, thr);
-        return thr;
-      }
-      _incrReadyCount() {
-        return this._readyCount++;
-      }
-      /**
-       * Awaits write operation to finish.
-       * Polls a newly created file for size variations. When files size does not change for 'threshold' milliseconds calls callback.
-       * @param path being acted upon
-       * @param threshold Time in milliseconds a file size must be fixed before acknowledging write OP is finished
-       * @param event
-       * @param awfEmit Callback to be called when ready for event to be emitted.
-       */
-      _awaitWriteFinish(path5, threshold, event, awfEmit) {
-        const awf = this.options.awaitWriteFinish;
-        if (typeof awf !== "object")
-          return;
-        const pollInterval = awf.pollInterval;
-        let timeoutHandler;
-        let fullPath = path5;
-        if (this.options.cwd && !sysPath2.isAbsolute(path5)) {
-          fullPath = sysPath2.join(this.options.cwd, path5);
-        }
-        const now = /* @__PURE__ */ new Date();
-        const writes = this._pendingWrites;
-        function awaitWriteFinishFn(prevStat) {
-          statcb(fullPath, (err, curStat) => {
-            if (err || !writes.has(path5)) {
-              if (err && err.code !== "ENOENT")
-                awfEmit(err);
-              return;
-            }
-            const now2 = Number(/* @__PURE__ */ new Date());
-            if (prevStat && curStat.size !== prevStat.size) {
-              writes.get(path5).lastChange = now2;
-            }
-            const pw = writes.get(path5);
-            const df = now2 - pw.lastChange;
-            if (df >= threshold) {
-              writes.delete(path5);
-              awfEmit(void 0, curStat);
-            } else {
-              timeoutHandler = setTimeout(awaitWriteFinishFn, pollInterval, curStat);
-            }
-          });
-        }
-        if (!writes.has(path5)) {
-          writes.set(path5, {
-            lastChange: now,
-            cancelWait: () => {
-              writes.delete(path5);
-              clearTimeout(timeoutHandler);
-              return event;
-            }
-          });
-          timeoutHandler = setTimeout(awaitWriteFinishFn, pollInterval);
-        }
-      }
-      /**
-       * Determines whether user has asked to ignore this path.
-       */
-      _isIgnored(path5, stats) {
-        if (this.options.atomic && DOT_RE.test(path5))
-          return true;
-        if (!this._userIgnored) {
-          const { cwd } = this.options;
-          const ign = this.options.ignored;
-          const ignored = (ign || []).map(normalizeIgnored(cwd));
-          const ignoredPaths = [...this._ignoredPaths];
-          const list2 = [...ignoredPaths.map(normalizeIgnored(cwd)), ...ignored];
-          this._userIgnored = anymatch(list2, void 0);
-        }
-        return this._userIgnored(path5, stats);
-      }
-      _isntIgnored(path5, stat4) {
-        return !this._isIgnored(path5, stat4);
-      }
-      /**
-       * Provides a set of common helpers and properties relating to symlink handling.
-       * @param path file or directory pattern being watched
-       */
-      _getWatchHelpers(path5) {
-        return new WatchHelper(path5, this.options.followSymlinks, this);
-      }
-      // Directory helpers
-      // -----------------
-      /**
-       * Provides directory tracking objects
-       * @param directory path of the directory
-       */
-      _getWatchedDir(directory) {
-        const dir = sysPath2.resolve(directory);
-        if (!this._watched.has(dir))
-          this._watched.set(dir, new DirEntry(dir, this._boundRemove));
-        return this._watched.get(dir);
-      }
-      // File helpers
-      // ------------
-      /**
-       * Check for read permissions: https://stackoverflow.com/a/11781404/1358405
-       */
-      _hasReadPermissions(stats) {
-        if (this.options.ignorePermissionErrors)
-          return true;
-        return Boolean(Number(stats.mode) & 256);
-      }
-      /**
-       * Handles emitting unlink events for
-       * files and directories, and via recursion, for
-       * files and directories within directories that are unlinked
-       * @param directory within which the following item is located
-       * @param item      base path of item/directory
-       */
-      _remove(directory, item, isDirectory) {
-        const path5 = sysPath2.join(directory, item);
-        const fullPath = sysPath2.resolve(path5);
-        isDirectory = isDirectory != null ? isDirectory : this._watched.has(path5) || this._watched.has(fullPath);
-        if (!this._throttle("remove", path5, 100))
-          return;
-        if (!isDirectory && this._watched.size === 1) {
-          this.add(directory, item, true);
-        }
-        const wp = this._getWatchedDir(path5);
-        const nestedDirectoryChildren = wp.getChildren();
-        nestedDirectoryChildren.forEach((nested) => this._remove(path5, nested));
-        const parent = this._getWatchedDir(directory);
-        const wasTracked = parent.has(item);
-        parent.remove(item);
-        if (this._symlinkPaths.has(fullPath)) {
-          this._symlinkPaths.delete(fullPath);
-        }
-        let relPath = path5;
-        if (this.options.cwd)
-          relPath = sysPath2.relative(this.options.cwd, path5);
-        if (this.options.awaitWriteFinish && this._pendingWrites.has(relPath)) {
-          const event = this._pendingWrites.get(relPath).cancelWait();
-          if (event === EVENTS.ADD)
-            return;
-        }
-        this._watched.delete(path5);
-        this._watched.delete(fullPath);
-        const eventName = isDirectory ? EVENTS.UNLINK_DIR : EVENTS.UNLINK;
-        if (wasTracked && !this._isIgnored(path5))
-          this._emit(eventName, path5);
-        this._closePath(path5);
-      }
-      /**
-       * Closes all watchers for a path
-       */
-      _closePath(path5) {
-        this._closeFile(path5);
-        const dir = sysPath2.dirname(path5);
-        this._getWatchedDir(dir).remove(sysPath2.basename(path5));
-      }
-      /**
-       * Closes only file-specific watchers
-       */
-      _closeFile(path5) {
-        const closers = this._closers.get(path5);
-        if (!closers)
-          return;
-        closers.forEach((closer) => closer());
-        this._closers.delete(path5);
-      }
-      _addPathCloser(path5, closer) {
-        if (!closer)
-          return;
-        let list2 = this._closers.get(path5);
-        if (!list2) {
-          list2 = [];
-          this._closers.set(path5, list2);
-        }
-        list2.push(closer);
-      }
-      _readdirp(root, opts) {
-        if (this.closed)
-          return;
-        const options = { type: EVENTS.ALL, alwaysStat: true, lstat: true, ...opts, depth: 0 };
-        let stream = readdirp(root, options);
-        this._streams.add(stream);
-        stream.once(STR_CLOSE, () => {
-          stream = void 0;
-        });
-        stream.once(STR_END, () => {
-          if (stream) {
-            this._streams.delete(stream);
-            stream = void 0;
-          }
-        });
-        return stream;
-      }
-    };
-    esm_default = { watch, FSWatcher };
-  }
-});
+import{createRequire as createBundledRequire}from'node:module';const require=createBundledRequire(import.meta.url);
 
 // src/main.ts
 import fs5 from "node:fs";
-import path4 from "node:path";
+import path5 from "node:path";
 
-// src/index/InvertedIndex.ts
-var InvertedIndex = class {
-  refs = /* @__PURE__ */ new Map();
-  add(symbolId, location) {
-    const existing = this.refs.get(symbolId);
-    if (existing === void 0) {
-      this.refs.set(symbolId, [location]);
-      return;
-    }
-    existing.push(location);
+// src/collections.ts
+function appendTo(map, key, value) {
+  const existing = map.get(key);
+  if (existing === void 0) {
+    map.set(key, [value]);
+  } else {
+    existing.push(value);
   }
-  deleteAll(symbolId) {
-    this.refs.delete(symbolId);
-  }
-  deleteByFile(fileId) {
-    for (const [symbolId, locations] of this.refs) {
-      const next = locations.filter((location) => location.fileId !== fileId);
-      if (next.length === 0) {
-        this.refs.delete(symbolId);
-        continue;
-      }
-      if (next.length !== locations.length) {
-        this.refs.set(symbolId, next);
-      }
-    }
-  }
-  lookup(symbolId) {
-    return this.refs.get(symbolId) ?? [];
-  }
-  count(symbolId) {
-    return this.refs.get(symbolId)?.length ?? 0;
-  }
-  clear() {
-    this.refs.clear();
-  }
-};
-
-// src/index/StringPool.ts
-var StringPool = class {
-  values = [""];
-  ids = /* @__PURE__ */ new Map();
-  intern(value) {
-    const existing = this.ids.get(value);
-    if (existing !== void 0) {
-      return existing;
-    }
-    const id = this.values.length;
-    this.values.push(value);
-    this.ids.set(value, id);
-    return id;
-  }
-  get(id) {
-    return this.values[id] ?? "";
-  }
-  find(value) {
-    return this.ids.get(value);
-  }
-  size() {
-    return this.values.length - 1;
-  }
-};
+}
 
 // src/index/Index.ts
 var Index = class {
-  pool = new StringPool();
+  paths = [];
+  pathIds = /* @__PURE__ */ new Map();
   symbols = /* @__PURE__ */ new Map();
   byFile = /* @__PURE__ */ new Map();
-  refs = new InvertedIndex();
+  references = /* @__PURE__ */ new Map();
   allSymbolsCache = null;
-  strings() {
-    return this.pool;
-  }
+  byNameCache = null;
   fileId(filePath) {
-    return this.pool.intern(filePath);
-  }
-  fileIdOf(filePath) {
-    return this.pool.find(filePath);
+    const existing = this.pathIds.get(filePath);
+    if (existing !== void 0) {
+      return existing;
+    }
+    const id = this.paths.length;
+    this.paths.push(filePath);
+    this.pathIds.set(filePath, id);
+    return id;
   }
   filePath(fileId) {
-    return this.pool.get(fileId);
+    return this.paths[fileId] ?? "";
   }
   insert(symbol) {
-    if (symbol.fullName.length === 0 || this.symbols.has(symbol.fullName)) {
+    const key = symbolKey(symbol.kind, symbol.fullName);
+    if (this.symbols.has(key)) {
       return false;
     }
-    symbol.id = this.pool.intern(symbol.fullName);
-    this.symbols.set(symbol.fullName, symbol);
-    const names = this.byFile.get(symbol.fileId);
-    if (names === void 0) {
-      this.byFile.set(symbol.fileId, [symbol.fullName]);
-    } else {
-      names.push(symbol.fullName);
-    }
+    this.symbols.set(key, symbol);
+    appendTo(this.byFile, symbol.fileId, symbol);
     this.allSymbolsCache = null;
+    this.byNameCache = null;
     return true;
-  }
-  deleteByFile(fileId) {
-    for (const fullName of this.byFile.get(fileId) ?? []) {
-      const symbol = this.symbols.get(fullName);
-      if (symbol !== void 0) {
-        this.refs.deleteAll(symbol.id);
-      }
-      this.symbols.delete(fullName);
-    }
-    this.byFile.delete(fileId);
-    this.refs.deleteByFile(fileId);
-    this.allSymbolsCache = null;
   }
   clear() {
     this.symbols.clear();
     this.byFile.clear();
-    this.refs.clear();
+    this.references.clear();
     this.allSymbolsCache = null;
+    this.byNameCache = null;
   }
-  lookup(fullName) {
-    return this.symbols.get(fullName);
-  }
-  has(fullName) {
-    return this.symbols.has(fullName);
+  lookup(fullName, kind) {
+    return this.symbols.get(symbolKey(kind, fullName));
   }
   allSymbols() {
     if (this.allSymbolsCache === null) {
@@ -1858,36 +64,35 @@ var Index = class {
     }
     return this.allSymbolsCache;
   }
-  symbolsByFile(fileId) {
-    const names = this.byFile.get(fileId) ?? [];
-    return names.flatMap((name) => {
-      const symbol = this.symbols.get(name);
-      return symbol === void 0 ? [] : [symbol];
-    });
-  }
-  fileIds() {
-    return Array.from(this.byFile.keys());
-  }
-  addReference(fullName, location) {
-    const symbol = this.symbols.get(fullName);
-    if (symbol === void 0) {
-      return false;
+  named(name) {
+    if (this.byNameCache === null) {
+      this.byNameCache = /* @__PURE__ */ new Map();
+      for (const symbol of this.allSymbols()) {
+        appendTo(this.byNameCache, symbol.name, symbol);
+      }
     }
-    this.refs.add(symbol.id, location);
-    return true;
+    return this.byNameCache.get(name) ?? [];
   }
-  referencesTo(fullName) {
-    const symbol = this.symbols.get(fullName);
-    return symbol === void 0 ? [] : this.refs.lookup(symbol.id);
+  symbolsByFile(fileId) {
+    return this.byFile.get(fileId) ?? [];
+  }
+  addReference(symbol, location) {
+    appendTo(this.references, symbolKey(symbol.kind, symbol.fullName), location);
+  }
+  referencesTo(symbol) {
+    return this.references.get(symbolKey(symbol.kind, symbol.fullName)) ?? [];
   }
   stats() {
     let referenceCount = 0;
-    for (const symbol of this.symbols.values()) {
-      referenceCount += this.refs.count(symbol.id);
+    for (const locations of this.references.values()) {
+      referenceCount += locations.length;
     }
-    return { symbolCount: this.symbols.size, fileCount: this.byFile.size, referenceCount };
+    return { symbolCount: this.symbols.size, referenceCount };
   }
 };
+function symbolKey(kind, fullName) {
+  return `${kind} ${fullName}`;
+}
 
 // node_modules/acorn/dist/acorn.mjs
 var astralIdentifierCodes = [509, 0, 227, 0, 150, 4, 294, 9, 1368, 2, 2, 1, 6, 3, 41, 2, 5, 0, 166, 1, 574, 3, 9, 9, 7, 9, 32, 4, 318, 1, 78, 5, 71, 10, 50, 3, 123, 2, 54, 14, 32, 10, 3, 1, 11, 3, 46, 10, 8, 0, 46, 9, 7, 2, 37, 13, 2, 9, 6, 1, 45, 0, 13, 2, 49, 13, 9, 3, 2, 11, 83, 11, 7, 0, 3, 0, 158, 11, 6, 9, 7, 3, 56, 1, 2, 6, 3, 1, 3, 2, 10, 0, 11, 1, 3, 6, 4, 4, 68, 8, 2, 0, 3, 0, 2, 3, 2, 4, 2, 0, 15, 1, 83, 17, 10, 9, 5, 0, 82, 19, 13, 9, 214, 6, 3, 8, 28, 1, 83, 16, 16, 9, 82, 12, 9, 9, 7, 19, 58, 14, 5, 9, 243, 14, 166, 9, 71, 5, 2, 1, 3, 3, 2, 0, 2, 1, 13, 9, 120, 6, 3, 6, 4, 0, 29, 9, 41, 6, 2, 3, 9, 0, 10, 10, 47, 15, 199, 7, 137, 9, 54, 7, 2, 7, 17, 9, 57, 21, 2, 13, 123, 5, 4, 0, 2, 1, 2, 6, 2, 0, 9, 9, 49, 4, 2, 1, 2, 4, 9, 9, 55, 9, 266, 3, 10, 1, 2, 0, 49, 6, 4, 4, 14, 10, 5350, 0, 7, 14, 11465, 27, 2343, 9, 87, 9, 39, 4, 60, 6, 26, 9, 535, 9, 470, 0, 2, 54, 8, 3, 82, 0, 12, 1, 19628, 1, 4178, 9, 519, 45, 3, 22, 543, 4, 4, 5, 9, 7, 3, 6, 31, 3, 149, 2, 1418, 49, 513, 54, 5, 49, 9, 0, 15, 0, 23, 4, 2, 14, 1361, 6, 2, 16, 3, 6, 2, 1, 2, 4, 101, 0, 161, 6, 10, 9, 357, 0, 62, 13, 499, 13, 245, 1, 2, 9, 233, 0, 3, 0, 8, 1, 6, 0, 475, 6, 110, 6, 6, 9, 4759, 9, 787719, 239];
@@ -2380,10 +585,10 @@ var Parser = function Parser2(options, input, startPos) {
 var prototypeAccessors = { inFunction: { configurable: true }, inGenerator: { configurable: true }, inAsync: { configurable: true }, canAwait: { configurable: true }, allowReturn: { configurable: true }, allowSuper: { configurable: true }, allowDirectSuper: { configurable: true }, treatFunctionsAsVar: { configurable: true }, allowNewDotTarget: { configurable: true }, allowUsing: { configurable: true }, inClassStaticBlock: { configurable: true } };
 Parser.prototype.parse = function parse() {
   var this$1$1 = this;
-  var node2 = this.options.program || this.startNode();
+  var node = this.options.program || this.startNode();
   this.nextToken();
   return this.catchStackOverflow(function() {
-    return this$1$1.parseTopLevel(node2);
+    return this$1$1.parseTopLevel(node);
   });
 };
 prototypeAccessors.inFunction.get = function() {
@@ -2613,14 +818,14 @@ pp$9.isSimpleAssignTarget = function(expr) {
   return expr.type === "Identifier" || expr.type === "MemberExpression";
 };
 var pp$8 = Parser.prototype;
-pp$8.parseTopLevel = function(node2) {
+pp$8.parseTopLevel = function(node) {
   var exports$1 = /* @__PURE__ */ Object.create(null);
-  if (!node2.body) {
-    node2.body = [];
+  if (!node.body) {
+    node.body = [];
   }
   while (this.type !== types$1.eof) {
     var stmt = this.parseStatement(null, true, exports$1);
-    node2.body.push(stmt);
+    node.body.push(stmt);
   }
   if (this.inModule) {
     for (var i2 = 0, list2 = Object.keys(this.undefinedExports); i2 < list2.length; i2 += 1) {
@@ -2628,10 +833,10 @@ pp$8.parseTopLevel = function(node2) {
       this.raiseRecoverable(this.undefinedExports[name].start, "Export '" + name + "' is not defined");
     }
   }
-  this.adaptDirectivePrologue(node2.body);
+  this.adaptDirectivePrologue(node.body);
   this.next();
-  node2.sourceType = this.options.sourceType === "commonjs" ? "script" : this.options.sourceType;
-  return this.finishNode(node2, "Program");
+  node.sourceType = this.options.sourceType === "commonjs" ? "script" : this.options.sourceType;
+  return this.finishNode(node, "Program");
 };
 var loopLabel = { kind: "loop" };
 var switchLabel = { kind: "switch" };
@@ -2730,7 +935,7 @@ pp$8.isUsing = function(isFor) {
   return this.isUsingKeyword(false, isFor);
 };
 pp$8.parseStatement = function(context, topLevel, exports$1) {
-  var starttype = this.type, node2 = this.startNode(), kind;
+  var starttype = this.type, node = this.startNode(), kind;
   if (this.isLet(context)) {
     starttype = types$1._var;
     kind = "let";
@@ -2738,48 +943,48 @@ pp$8.parseStatement = function(context, topLevel, exports$1) {
   switch (starttype) {
     case types$1._break:
     case types$1._continue:
-      return this.parseBreakContinueStatement(node2, starttype.keyword);
+      return this.parseBreakContinueStatement(node, starttype.keyword);
     case types$1._debugger:
-      return this.parseDebuggerStatement(node2);
+      return this.parseDebuggerStatement(node);
     case types$1._do:
-      return this.parseDoStatement(node2);
+      return this.parseDoStatement(node);
     case types$1._for:
-      return this.parseForStatement(node2);
+      return this.parseForStatement(node);
     case types$1._function:
       if (context && (this.strict || context !== "if" && context !== "label") && this.options.ecmaVersion >= 6) {
         this.unexpected();
       }
-      return this.parseFunctionStatement(node2, false, !context);
+      return this.parseFunctionStatement(node, false, !context);
     case types$1._class:
       if (context) {
         this.unexpected();
       }
-      return this.parseClass(node2, true);
+      return this.parseClass(node, true);
     case types$1._if:
-      return this.parseIfStatement(node2);
+      return this.parseIfStatement(node);
     case types$1._return:
-      return this.parseReturnStatement(node2);
+      return this.parseReturnStatement(node);
     case types$1._switch:
-      return this.parseSwitchStatement(node2);
+      return this.parseSwitchStatement(node);
     case types$1._throw:
-      return this.parseThrowStatement(node2);
+      return this.parseThrowStatement(node);
     case types$1._try:
-      return this.parseTryStatement(node2);
+      return this.parseTryStatement(node);
     case types$1._const:
     case types$1._var:
       kind = kind || this.value;
       if (context && kind !== "var") {
         this.unexpected();
       }
-      return this.parseVarStatement(node2, kind);
+      return this.parseVarStatement(node, kind);
     case types$1._while:
-      return this.parseWhileStatement(node2);
+      return this.parseWhileStatement(node);
     case types$1._with:
-      return this.parseWithStatement(node2);
+      return this.parseWithStatement(node);
     case types$1.braceL:
-      return this.parseBlock(true, node2);
+      return this.parseBlock(true, node);
     case types$1.semi:
-      return this.parseEmptyStatement(node2);
+      return this.parseEmptyStatement(node);
     case types$1._export:
     case types$1._import:
       if (this.options.ecmaVersion > 10 && starttype === types$1._import) {
@@ -2787,7 +992,7 @@ pp$8.parseStatement = function(context, topLevel, exports$1) {
         var skip = skipWhiteSpace.exec(this.input);
         var next = this.pos + skip[0].length, nextCh = this.input.charCodeAt(next);
         if (nextCh === 40 || nextCh === 46) {
-          return this.parseExpressionStatement(node2, this.parseExpression());
+          return this.parseExpressionStatement(node, this.parseExpression());
         }
       }
       if (!this.options.allowImportExportEverywhere) {
@@ -2798,7 +1003,7 @@ pp$8.parseStatement = function(context, topLevel, exports$1) {
           this.raise(this.start, "'import' and 'export' may appear only with 'sourceType: module'");
         }
       }
-      return starttype === types$1._import ? this.parseImport(node2) : this.parseExport(node2, exports$1);
+      return starttype === types$1._import ? this.parseImport(node) : this.parseExport(node, exports$1);
     // If the statement does not start with a statement keyword or a
     // brace, it's an ExpressionStatement or LabeledStatement. We
     // simply start parsing an expression, and afterwards, if the
@@ -2810,7 +1015,7 @@ pp$8.parseStatement = function(context, topLevel, exports$1) {
           this.unexpected();
         }
         this.next();
-        return this.parseFunctionStatement(node2, true, !context);
+        return this.parseFunctionStatement(node, true, !context);
       }
       var usingKind = this.isAwaitUsing(false) ? "await using" : this.isUsing(false) ? "using" : null;
       if (usingKind) {
@@ -2827,66 +1032,66 @@ pp$8.parseStatement = function(context, topLevel, exports$1) {
           this.next();
         }
         this.next();
-        this.parseVar(node2, false, usingKind);
+        this.parseVar(node, false, usingKind);
         this.semicolon();
-        return this.finishNode(node2, "VariableDeclaration");
+        return this.finishNode(node, "VariableDeclaration");
       }
       var maybeName = this.value, expr = this.parseExpression();
       if (starttype === types$1.name && expr.type === "Identifier" && this.eat(types$1.colon)) {
-        return this.parseLabeledStatement(node2, maybeName, expr, context);
+        return this.parseLabeledStatement(node, maybeName, expr, context);
       } else {
-        return this.parseExpressionStatement(node2, expr);
+        return this.parseExpressionStatement(node, expr);
       }
   }
 };
-pp$8.parseBreakContinueStatement = function(node2, keyword) {
+pp$8.parseBreakContinueStatement = function(node, keyword) {
   var isBreak = keyword === "break";
   this.next();
   if (this.eat(types$1.semi) || this.insertSemicolon()) {
-    node2.label = null;
+    node.label = null;
   } else if (this.type !== types$1.name) {
     this.unexpected();
   } else {
-    node2.label = this.parseIdent();
+    node.label = this.parseIdent();
     this.semicolon();
   }
   var i2 = 0;
   for (; i2 < this.labels.length; ++i2) {
     var lab = this.labels[i2];
-    if (node2.label == null || lab.name === node2.label.name) {
+    if (node.label == null || lab.name === node.label.name) {
       if (lab.kind != null && (isBreak || lab.kind === "loop")) {
         break;
       }
-      if (node2.label && isBreak) {
+      if (node.label && isBreak) {
         break;
       }
     }
   }
   if (i2 === this.labels.length) {
-    this.raise(node2.start, "Unsyntactic " + keyword);
+    this.raise(node.start, "Unsyntactic " + keyword);
   }
-  return this.finishNode(node2, isBreak ? "BreakStatement" : "ContinueStatement");
+  return this.finishNode(node, isBreak ? "BreakStatement" : "ContinueStatement");
 };
-pp$8.parseDebuggerStatement = function(node2) {
+pp$8.parseDebuggerStatement = function(node) {
   this.next();
   this.semicolon();
-  return this.finishNode(node2, "DebuggerStatement");
+  return this.finishNode(node, "DebuggerStatement");
 };
-pp$8.parseDoStatement = function(node2) {
+pp$8.parseDoStatement = function(node) {
   this.next();
   this.labels.push(loopLabel);
-  node2.body = this.parseStatement("do");
+  node.body = this.parseStatement("do");
   this.labels.pop();
   this.expect(types$1._while);
-  node2.test = this.parseParenExpression();
+  node.test = this.parseParenExpression();
   if (this.options.ecmaVersion >= 6) {
     this.eat(types$1.semi);
   } else {
     this.semicolon();
   }
-  return this.finishNode(node2, "DoWhileStatement");
+  return this.finishNode(node, "DoWhileStatement");
 };
-pp$8.parseForStatement = function(node2) {
+pp$8.parseForStatement = function(node) {
   this.next();
   var awaitAt = this.options.ecmaVersion >= 9 && this.canAwait && this.eatContextual("await") ? this.lastTokStart : -1;
   this.labels.push(loopLabel);
@@ -2896,7 +1101,7 @@ pp$8.parseForStatement = function(node2) {
     if (awaitAt > -1) {
       this.unexpected(awaitAt);
     }
-    return this.parseFor(node2, null);
+    return this.parseFor(node, null);
   }
   var isLet = this.isLet();
   if (this.type === types$1._var || this.type === types$1._const || isLet) {
@@ -2904,7 +1109,7 @@ pp$8.parseForStatement = function(node2) {
     this.next();
     this.parseVar(init$1, true, kind);
     this.finishNode(init$1, "VariableDeclaration");
-    return this.parseForAfterInit(node2, init$1, awaitAt);
+    return this.parseForAfterInit(node, init$1, awaitAt);
   }
   var startsWithLet = this.isContextual("let"), isForOf = false;
   var usingKind = this.isUsing(true) ? "using" : this.isAwaitUsing(true) ? "await using" : null;
@@ -2919,7 +1124,7 @@ pp$8.parseForStatement = function(node2) {
     }
     this.parseVar(init$2, true, usingKind);
     this.finishNode(init$2, "VariableDeclaration");
-    return this.parseForAfterInit(node2, init$2, awaitAt);
+    return this.parseForAfterInit(node, init$2, awaitAt);
   }
   var containsEsc = this.containsEsc;
   var refDestructuringErrors = new DestructuringErrors();
@@ -2930,12 +1135,12 @@ pp$8.parseForStatement = function(node2) {
       if (this.type === types$1._in) {
         this.unexpected(awaitAt);
       }
-      node2.await = true;
+      node.await = true;
     } else if (isForOf && this.options.ecmaVersion >= 8) {
       if (init.start === initPos && !containsEsc && init.type === "Identifier" && init.name === "async") {
         this.unexpected();
       } else if (this.options.ecmaVersion >= 9) {
-        node2.await = false;
+        node.await = false;
       }
     }
     if (startsWithLet && isForOf) {
@@ -2943,16 +1148,16 @@ pp$8.parseForStatement = function(node2) {
     }
     this.toAssignable(init, false, refDestructuringErrors);
     this.checkLValPattern(init);
-    return this.parseForIn(node2, init);
+    return this.parseForIn(node, init);
   } else {
     this.checkExpressionErrors(refDestructuringErrors, true);
   }
   if (awaitAt > -1) {
     this.unexpected(awaitAt);
   }
-  return this.parseFor(node2, init);
+  return this.parseFor(node, init);
 };
-pp$8.parseForAfterInit = function(node2, init, awaitAt) {
+pp$8.parseForAfterInit = function(node, init, awaitAt) {
   if ((this.type === types$1._in || this.options.ecmaVersion >= 6 && this.isContextual("of")) && init.declarations.length === 1) {
     if (this.type === types$1._in) {
       if ((init.kind === "using" || init.kind === "await using") && !init.declarations[0].init) {
@@ -2962,43 +1167,43 @@ pp$8.parseForAfterInit = function(node2, init, awaitAt) {
         this.unexpected(awaitAt);
       }
     } else if (this.options.ecmaVersion >= 9) {
-      node2.await = awaitAt > -1;
+      node.await = awaitAt > -1;
     }
-    return this.parseForIn(node2, init);
+    return this.parseForIn(node, init);
   }
   if (awaitAt > -1) {
     this.unexpected(awaitAt);
   }
-  return this.parseFor(node2, init);
+  return this.parseFor(node, init);
 };
-pp$8.parseFunctionStatement = function(node2, isAsync, declarationPosition) {
+pp$8.parseFunctionStatement = function(node, isAsync, declarationPosition) {
   this.next();
-  return this.parseFunction(node2, FUNC_STATEMENT | (declarationPosition ? 0 : FUNC_HANGING_STATEMENT), false, isAsync);
+  return this.parseFunction(node, FUNC_STATEMENT | (declarationPosition ? 0 : FUNC_HANGING_STATEMENT), false, isAsync);
 };
-pp$8.parseIfStatement = function(node2) {
+pp$8.parseIfStatement = function(node) {
   this.next();
-  node2.test = this.parseParenExpression();
-  node2.consequent = this.parseStatement("if");
-  node2.alternate = this.eat(types$1._else) ? this.parseStatement("if") : null;
-  return this.finishNode(node2, "IfStatement");
+  node.test = this.parseParenExpression();
+  node.consequent = this.parseStatement("if");
+  node.alternate = this.eat(types$1._else) ? this.parseStatement("if") : null;
+  return this.finishNode(node, "IfStatement");
 };
-pp$8.parseReturnStatement = function(node2) {
+pp$8.parseReturnStatement = function(node) {
   if (!this.allowReturn) {
     this.raise(this.start, "'return' outside of function");
   }
   this.next();
   if (this.eat(types$1.semi) || this.insertSemicolon()) {
-    node2.argument = null;
+    node.argument = null;
   } else {
-    node2.argument = this.parseExpression();
+    node.argument = this.parseExpression();
     this.semicolon();
   }
-  return this.finishNode(node2, "ReturnStatement");
+  return this.finishNode(node, "ReturnStatement");
 };
-pp$8.parseSwitchStatement = function(node2) {
+pp$8.parseSwitchStatement = function(node) {
   this.next();
-  node2.discriminant = this.parseParenExpression();
-  node2.cases = [];
+  node.discriminant = this.parseParenExpression();
+  node.cases = [];
   this.expect(types$1.braceL);
   this.labels.push(switchLabel);
   this.enterScope(SCOPE_SWITCH);
@@ -3009,7 +1214,7 @@ pp$8.parseSwitchStatement = function(node2) {
       if (cur) {
         this.finishNode(cur, "SwitchCase");
       }
-      node2.cases.push(cur = this.startNode());
+      node.cases.push(cur = this.startNode());
       cur.consequent = [];
       this.next();
       if (isCase) {
@@ -3035,16 +1240,16 @@ pp$8.parseSwitchStatement = function(node2) {
   }
   this.next();
   this.labels.pop();
-  return this.finishNode(node2, "SwitchStatement");
+  return this.finishNode(node, "SwitchStatement");
 };
-pp$8.parseThrowStatement = function(node2) {
+pp$8.parseThrowStatement = function(node) {
   this.next();
   if (lineBreak.test(this.input.slice(this.lastTokEnd, this.start))) {
     this.raise(this.lastTokEnd, "Illegal newline after throw");
   }
-  node2.argument = this.parseExpression();
+  node.argument = this.parseExpression();
   this.semicolon();
-  return this.finishNode(node2, "ThrowStatement");
+  return this.finishNode(node, "ThrowStatement");
 };
 var empty$1 = [];
 pp$8.parseCatchClauseParam = function() {
@@ -3055,10 +1260,10 @@ pp$8.parseCatchClauseParam = function() {
   this.expect(types$1.parenR);
   return param;
 };
-pp$8.parseTryStatement = function(node2) {
+pp$8.parseTryStatement = function(node) {
   this.next();
-  node2.block = this.parseBlock();
-  node2.handler = null;
+  node.block = this.parseBlock();
+  node.handler = null;
   if (this.type === types$1._catch) {
     var clause = this.startNode();
     this.next();
@@ -3073,42 +1278,42 @@ pp$8.parseTryStatement = function(node2) {
     }
     clause.body = this.parseBlock(false);
     this.exitScope();
-    node2.handler = this.finishNode(clause, "CatchClause");
+    node.handler = this.finishNode(clause, "CatchClause");
   }
-  node2.finalizer = this.eat(types$1._finally) ? this.parseBlock() : null;
-  if (!node2.handler && !node2.finalizer) {
-    this.raise(node2.start, "Missing catch or finally clause");
+  node.finalizer = this.eat(types$1._finally) ? this.parseBlock() : null;
+  if (!node.handler && !node.finalizer) {
+    this.raise(node.start, "Missing catch or finally clause");
   }
-  return this.finishNode(node2, "TryStatement");
+  return this.finishNode(node, "TryStatement");
 };
-pp$8.parseVarStatement = function(node2, kind, allowMissingInitializer) {
+pp$8.parseVarStatement = function(node, kind, allowMissingInitializer) {
   this.next();
-  this.parseVar(node2, false, kind, allowMissingInitializer);
+  this.parseVar(node, false, kind, allowMissingInitializer);
   this.semicolon();
-  return this.finishNode(node2, "VariableDeclaration");
+  return this.finishNode(node, "VariableDeclaration");
 };
-pp$8.parseWhileStatement = function(node2) {
+pp$8.parseWhileStatement = function(node) {
   this.next();
-  node2.test = this.parseParenExpression();
+  node.test = this.parseParenExpression();
   this.labels.push(loopLabel);
-  node2.body = this.parseStatement("while");
+  node.body = this.parseStatement("while");
   this.labels.pop();
-  return this.finishNode(node2, "WhileStatement");
+  return this.finishNode(node, "WhileStatement");
 };
-pp$8.parseWithStatement = function(node2) {
+pp$8.parseWithStatement = function(node) {
   if (this.strict) {
     this.raise(this.start, "'with' in strict mode");
   }
   this.next();
-  node2.object = this.parseParenExpression();
-  node2.body = this.parseStatement("with");
-  return this.finishNode(node2, "WithStatement");
+  node.object = this.parseParenExpression();
+  node.body = this.parseStatement("with");
+  return this.finishNode(node, "WithStatement");
 };
-pp$8.parseEmptyStatement = function(node2) {
+pp$8.parseEmptyStatement = function(node) {
   this.next();
-  return this.finishNode(node2, "EmptyStatement");
+  return this.finishNode(node, "EmptyStatement");
 };
-pp$8.parseLabeledStatement = function(node2, maybeName, expr, context) {
+pp$8.parseLabeledStatement = function(node, maybeName, expr, context) {
   for (var i$1 = 0, list2 = this.labels; i$1 < list2.length; i$1 += 1) {
     var label = list2[i$1];
     if (label.name === maybeName) {
@@ -3118,7 +1323,7 @@ pp$8.parseLabeledStatement = function(node2, maybeName, expr, context) {
   var kind = this.type.isLoop ? "loop" : this.type === types$1._switch ? "switch" : null;
   for (var i2 = this.labels.length - 1; i2 >= 0; i2--) {
     var label$1 = this.labels[i2];
-    if (label$1.statementStart === node2.start) {
+    if (label$1.statementStart === node.start) {
       label$1.statementStart = this.start;
       label$1.kind = kind;
     } else {
@@ -3126,27 +1331,27 @@ pp$8.parseLabeledStatement = function(node2, maybeName, expr, context) {
     }
   }
   this.labels.push({ name: maybeName, kind, statementStart: this.start });
-  node2.body = this.parseStatement(context ? context.indexOf("label") === -1 ? context + "label" : context : "label");
+  node.body = this.parseStatement(context ? context.indexOf("label") === -1 ? context + "label" : context : "label");
   this.labels.pop();
-  node2.label = expr;
-  return this.finishNode(node2, "LabeledStatement");
+  node.label = expr;
+  return this.finishNode(node, "LabeledStatement");
 };
-pp$8.parseExpressionStatement = function(node2, expr) {
-  node2.expression = expr;
+pp$8.parseExpressionStatement = function(node, expr) {
+  node.expression = expr;
   this.semicolon();
-  return this.finishNode(node2, "ExpressionStatement");
+  return this.finishNode(node, "ExpressionStatement");
 };
-pp$8.parseBlock = function(createNewLexicalScope, node2, exitStrict) {
+pp$8.parseBlock = function(createNewLexicalScope, node, exitStrict) {
   if (createNewLexicalScope === void 0) createNewLexicalScope = true;
-  if (node2 === void 0) node2 = this.startNode();
-  node2.body = [];
+  if (node === void 0) node = this.startNode();
+  node.body = [];
   this.expect(types$1.braceL);
   if (createNewLexicalScope) {
     this.enterScope(0);
   }
   while (this.type !== types$1.braceR) {
     var stmt = this.parseStatement(null);
-    node2.body.push(stmt);
+    node.body.push(stmt);
   }
   if (exitStrict) {
     this.strict = false;
@@ -3155,21 +1360,21 @@ pp$8.parseBlock = function(createNewLexicalScope, node2, exitStrict) {
   if (createNewLexicalScope) {
     this.exitScope();
   }
-  return this.finishNode(node2, "BlockStatement");
+  return this.finishNode(node, "BlockStatement");
 };
-pp$8.parseFor = function(node2, init) {
-  node2.init = init;
+pp$8.parseFor = function(node, init) {
+  node.init = init;
   this.expect(types$1.semi);
-  node2.test = this.type === types$1.semi ? null : this.parseExpression();
+  node.test = this.type === types$1.semi ? null : this.parseExpression();
   this.expect(types$1.semi);
-  node2.update = this.type === types$1.parenR ? null : this.parseExpression();
+  node.update = this.type === types$1.parenR ? null : this.parseExpression();
   this.expect(types$1.parenR);
-  node2.body = this.parseStatement("for");
+  node.body = this.parseStatement("for");
   this.exitScope();
   this.labels.pop();
-  return this.finishNode(node2, "ForStatement");
+  return this.finishNode(node, "ForStatement");
 };
-pp$8.parseForIn = function(node2, init) {
+pp$8.parseForIn = function(node, init) {
   var isForIn = this.type === types$1._in;
   this.next();
   if (init.type === "VariableDeclaration" && init.declarations[0].init != null && (!isForIn || this.options.ecmaVersion < 8 || this.strict || init.kind !== "var" || init.declarations[0].id.type !== "Identifier")) {
@@ -3178,17 +1383,17 @@ pp$8.parseForIn = function(node2, init) {
       (isForIn ? "for-in" : "for-of") + " loop variable declaration may not have an initializer"
     );
   }
-  node2.left = init;
-  node2.right = isForIn ? this.parseExpression() : this.parseMaybeAssign();
+  node.left = init;
+  node.right = isForIn ? this.parseExpression() : this.parseMaybeAssign();
   this.expect(types$1.parenR);
-  node2.body = this.parseStatement("for");
+  node.body = this.parseStatement("for");
   this.exitScope();
   this.labels.pop();
-  return this.finishNode(node2, isForIn ? "ForInStatement" : "ForOfStatement");
+  return this.finishNode(node, isForIn ? "ForInStatement" : "ForOfStatement");
 };
-pp$8.parseVar = function(node2, isFor, kind, allowMissingInitializer) {
-  node2.declarations = [];
-  node2.kind = kind;
+pp$8.parseVar = function(node, isFor, kind, allowMissingInitializer) {
+  node.declarations = [];
+  node.kind = kind;
   for (; ; ) {
     var decl = this.startNode();
     this.parseVarId(decl, kind);
@@ -3203,12 +1408,12 @@ pp$8.parseVar = function(node2, isFor, kind, allowMissingInitializer) {
     } else {
       decl.init = null;
     }
-    node2.declarations.push(this.finishNode(decl, "VariableDeclarator"));
+    node.declarations.push(this.finishNode(decl, "VariableDeclarator"));
     if (!this.eat(types$1.comma)) {
       break;
     }
   }
-  return node2;
+  return node;
 };
 pp$8.parseVarId = function(decl, kind) {
   decl.id = kind === "using" || kind === "await using" ? this.parseIdent() : this.parseBindingAtom();
@@ -3217,56 +1422,56 @@ pp$8.parseVarId = function(decl, kind) {
 var FUNC_STATEMENT = 1;
 var FUNC_HANGING_STATEMENT = 2;
 var FUNC_NULLABLE_ID = 4;
-pp$8.parseFunction = function(node2, statement, allowExpressionBody, isAsync, forInit) {
-  this.initFunction(node2);
+pp$8.parseFunction = function(node, statement, allowExpressionBody, isAsync, forInit) {
+  this.initFunction(node);
   if (this.options.ecmaVersion >= 9 || this.options.ecmaVersion >= 6 && !isAsync) {
     if (this.type === types$1.star && statement & FUNC_HANGING_STATEMENT) {
       this.unexpected();
     }
-    node2.generator = this.eat(types$1.star);
+    node.generator = this.eat(types$1.star);
   }
   if (this.options.ecmaVersion >= 8) {
-    node2.async = !!isAsync;
+    node.async = !!isAsync;
   }
   if (statement & FUNC_STATEMENT) {
-    node2.id = statement & FUNC_NULLABLE_ID && this.type !== types$1.name ? null : this.parseIdent();
-    if (node2.id && !(statement & FUNC_HANGING_STATEMENT)) {
-      this.checkLValSimple(node2.id, this.strict || node2.generator || node2.async ? this.treatFunctionsAsVar ? BIND_VAR : BIND_LEXICAL : BIND_FUNCTION);
+    node.id = statement & FUNC_NULLABLE_ID && this.type !== types$1.name ? null : this.parseIdent();
+    if (node.id && !(statement & FUNC_HANGING_STATEMENT)) {
+      this.checkLValSimple(node.id, this.strict || node.generator || node.async ? this.treatFunctionsAsVar ? BIND_VAR : BIND_LEXICAL : BIND_FUNCTION);
     }
   }
   var oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, oldAwaitIdentPos = this.awaitIdentPos;
   this.yieldPos = 0;
   this.awaitPos = 0;
   this.awaitIdentPos = 0;
-  this.enterScope(functionFlags(node2.async, node2.generator));
+  this.enterScope(functionFlags(node.async, node.generator));
   if (!(statement & FUNC_STATEMENT)) {
-    node2.id = this.type === types$1.name ? this.parseIdent() : null;
+    node.id = this.type === types$1.name ? this.parseIdent() : null;
   }
-  this.parseFunctionParams(node2);
-  this.parseFunctionBody(node2, allowExpressionBody, false, forInit);
+  this.parseFunctionParams(node);
+  this.parseFunctionBody(node, allowExpressionBody, false, forInit);
   this.yieldPos = oldYieldPos;
   this.awaitPos = oldAwaitPos;
   this.awaitIdentPos = oldAwaitIdentPos;
-  return this.finishNode(node2, statement & FUNC_STATEMENT ? "FunctionDeclaration" : "FunctionExpression");
+  return this.finishNode(node, statement & FUNC_STATEMENT ? "FunctionDeclaration" : "FunctionExpression");
 };
-pp$8.parseFunctionParams = function(node2) {
+pp$8.parseFunctionParams = function(node) {
   this.expect(types$1.parenL);
-  node2.params = this.parseBindingList(types$1.parenR, false, this.options.ecmaVersion >= 8);
+  node.params = this.parseBindingList(types$1.parenR, false, this.options.ecmaVersion >= 8);
   this.checkYieldAwaitInDefaultParams();
 };
-pp$8.parseClass = function(node2, isStatement) {
+pp$8.parseClass = function(node, isStatement) {
   this.next();
   var oldStrict = this.strict;
   this.strict = true;
-  this.parseClassId(node2, isStatement);
-  this.parseClassSuper(node2);
+  this.parseClassId(node, isStatement);
+  this.parseClassSuper(node);
   var privateNameMap = this.enterClassBody();
   var classBody = this.startNode();
   var hadConstructor = false;
   classBody.body = [];
   this.expect(types$1.braceL);
   while (this.type !== types$1.braceR) {
-    var element = this.parseClassElement(node2.superClass !== null);
+    var element = this.parseClassElement(node.superClass !== null);
     if (element) {
       classBody.body.push(element);
       if (element.type === "MethodDefinition" && element.kind === "constructor") {
@@ -3281,16 +1486,16 @@ pp$8.parseClass = function(node2, isStatement) {
   }
   this.strict = oldStrict;
   this.next();
-  node2.body = this.finishNode(classBody, "ClassBody");
+  node.body = this.finishNode(classBody, "ClassBody");
   this.exitClassBody();
-  return this.finishNode(node2, isStatement ? "ClassDeclaration" : "ClassExpression");
+  return this.finishNode(node, isStatement ? "ClassDeclaration" : "ClassExpression");
 };
 pp$8.parseClassElement = function(constructorAllowsSuper) {
   if (this.eat(types$1.semi)) {
     return null;
   }
   var ecmaVersion2 = this.options.ecmaVersion;
-  var node2 = this.startNode();
+  var node = this.startNode();
   var keyName = "";
   var isGenerator = false;
   var isAsync = false;
@@ -3298,8 +1503,8 @@ pp$8.parseClassElement = function(constructorAllowsSuper) {
   var isStatic = false;
   if (this.eatContextual("static")) {
     if (ecmaVersion2 >= 13 && this.eat(types$1.braceL)) {
-      this.parseClassStaticBlock(node2);
-      return node2;
+      this.parseClassStaticBlock(node);
+      return node;
     }
     if (this.isClassElementNameStart() || this.type === types$1.star) {
       isStatic = true;
@@ -3307,7 +1512,7 @@ pp$8.parseClassElement = function(constructorAllowsSuper) {
       keyName = "static";
     }
   }
-  node2.static = isStatic;
+  node.static = isStatic;
   if (!keyName && ecmaVersion2 >= 8 && this.eatContextual("async")) {
     if ((this.isClassElementNameStart() || this.type === types$1.star) && !this.canInsertSemicolon()) {
       isAsync = true;
@@ -3329,25 +1534,25 @@ pp$8.parseClassElement = function(constructorAllowsSuper) {
     }
   }
   if (keyName) {
-    node2.computed = false;
-    node2.key = this.startNodeAt(this.lastTokStart, this.lastTokStartLoc);
-    node2.key.name = keyName;
-    this.finishNode(node2.key, "Identifier");
+    node.computed = false;
+    node.key = this.startNodeAt(this.lastTokStart, this.lastTokStartLoc);
+    node.key.name = keyName;
+    this.finishNode(node.key, "Identifier");
   } else {
-    this.parseClassElementName(node2);
+    this.parseClassElementName(node);
   }
   if (ecmaVersion2 < 13 || this.type === types$1.parenL || kind !== "method" || isGenerator || isAsync) {
-    var isConstructor = !node2.static && checkKeyName(node2, "constructor");
+    var isConstructor = !node.static && checkKeyName(node, "constructor");
     var allowsDirectSuper = isConstructor && constructorAllowsSuper;
     if (isConstructor && kind !== "method") {
-      this.raise(node2.key.start, "Constructor can't have get/set modifier");
+      this.raise(node.key.start, "Constructor can't have get/set modifier");
     }
-    node2.kind = isConstructor ? "constructor" : kind;
-    this.parseClassMethod(node2, isGenerator, isAsync, allowsDirectSuper);
+    node.kind = isConstructor ? "constructor" : kind;
+    this.parseClassMethod(node, isGenerator, isAsync, allowsDirectSuper);
   } else {
-    this.parseClassField(node2);
+    this.parseClassField(node);
   }
-  return node2;
+  return node;
 };
 pp$8.isClassElementNameStart = function() {
   return this.type === types$1.name || this.type === types$1.privateId || this.type === types$1.num || this.type === types$1.string || this.type === types$1.bracketL || this.type.keyword;
@@ -3403,35 +1608,35 @@ pp$8.parseClassField = function(field) {
   this.semicolon();
   return this.finishNode(field, "PropertyDefinition");
 };
-pp$8.parseClassStaticBlock = function(node2) {
-  node2.body = [];
+pp$8.parseClassStaticBlock = function(node) {
+  node.body = [];
   var oldLabels = this.labels;
   this.labels = [];
   this.enterScope(SCOPE_CLASS_STATIC_BLOCK | SCOPE_SUPER);
   while (this.type !== types$1.braceR) {
     var stmt = this.parseStatement(null);
-    node2.body.push(stmt);
+    node.body.push(stmt);
   }
   this.next();
   this.exitScope();
   this.labels = oldLabels;
-  return this.finishNode(node2, "StaticBlock");
+  return this.finishNode(node, "StaticBlock");
 };
-pp$8.parseClassId = function(node2, isStatement) {
+pp$8.parseClassId = function(node, isStatement) {
   if (this.type === types$1.name) {
-    node2.id = this.parseIdent();
+    node.id = this.parseIdent();
     if (isStatement) {
-      this.checkLValSimple(node2.id, BIND_LEXICAL, false);
+      this.checkLValSimple(node.id, BIND_LEXICAL, false);
     }
   } else {
     if (isStatement === true) {
       this.unexpected();
     }
-    node2.id = null;
+    node.id = null;
   }
 };
-pp$8.parseClassSuper = function(node2) {
-  node2.superClass = this.eat(types$1._extends) ? this.parseExprSubscripts(null, false) : null;
+pp$8.parseClassSuper = function(node) {
+  node.superClass = this.eat(types$1._extends) ? this.parseExprSubscripts(null, false) : null;
 };
 pp$8.enterClassBody = function() {
   var element = { declared: /* @__PURE__ */ Object.create(null), used: [] };
@@ -3475,66 +1680,66 @@ function isPrivateNameConflicted(privateNameMap, element) {
     return true;
   }
 }
-function checkKeyName(node2, name) {
-  var computed = node2.computed;
-  var key = node2.key;
+function checkKeyName(node, name) {
+  var computed = node.computed;
+  var key = node.key;
   return !computed && (key.type === "Identifier" && key.name === name || key.type === "Literal" && key.value === name);
 }
-pp$8.parseExportAllDeclaration = function(node2, exports$1) {
+pp$8.parseExportAllDeclaration = function(node, exports$1) {
   if (this.options.ecmaVersion >= 11) {
     if (this.eatContextual("as")) {
-      node2.exported = this.parseModuleExportName();
-      this.checkExport(exports$1, node2.exported, this.lastTokStart);
+      node.exported = this.parseModuleExportName();
+      this.checkExport(exports$1, node.exported, this.lastTokStart);
     } else {
-      node2.exported = null;
+      node.exported = null;
     }
   }
   this.expectContextual("from");
   if (this.type !== types$1.string) {
     this.unexpected();
   }
-  node2.source = this.parseExprAtom();
+  node.source = this.parseExprAtom();
   if (this.options.ecmaVersion >= 16) {
-    node2.attributes = this.parseWithClause();
+    node.attributes = this.parseWithClause();
   }
   this.semicolon();
-  return this.finishNode(node2, "ExportAllDeclaration");
+  return this.finishNode(node, "ExportAllDeclaration");
 };
-pp$8.parseExport = function(node2, exports$1) {
+pp$8.parseExport = function(node, exports$1) {
   this.next();
   if (this.eat(types$1.star)) {
-    return this.parseExportAllDeclaration(node2, exports$1);
+    return this.parseExportAllDeclaration(node, exports$1);
   }
   if (this.eat(types$1._default)) {
     this.checkExport(exports$1, "default", this.lastTokStart);
-    node2.declaration = this.parseExportDefaultDeclaration();
-    return this.finishNode(node2, "ExportDefaultDeclaration");
+    node.declaration = this.parseExportDefaultDeclaration();
+    return this.finishNode(node, "ExportDefaultDeclaration");
   }
   if (this.shouldParseExportStatement()) {
-    node2.declaration = this.parseExportDeclaration(node2);
-    if (node2.declaration.type === "VariableDeclaration") {
-      this.checkVariableExport(exports$1, node2.declaration.declarations);
+    node.declaration = this.parseExportDeclaration(node);
+    if (node.declaration.type === "VariableDeclaration") {
+      this.checkVariableExport(exports$1, node.declaration.declarations);
     } else {
-      this.checkExport(exports$1, node2.declaration.id, node2.declaration.id.start);
+      this.checkExport(exports$1, node.declaration.id, node.declaration.id.start);
     }
-    node2.specifiers = [];
-    node2.source = null;
+    node.specifiers = [];
+    node.source = null;
     if (this.options.ecmaVersion >= 16) {
-      node2.attributes = [];
+      node.attributes = [];
     }
   } else {
-    node2.declaration = null;
-    node2.specifiers = this.parseExportSpecifiers(exports$1);
+    node.declaration = null;
+    node.specifiers = this.parseExportSpecifiers(exports$1);
     if (this.eatContextual("from")) {
       if (this.type !== types$1.string) {
         this.unexpected();
       }
-      node2.source = this.parseExprAtom();
+      node.source = this.parseExprAtom();
       if (this.options.ecmaVersion >= 16) {
-        node2.attributes = this.parseWithClause();
+        node.attributes = this.parseWithClause();
       }
     } else {
-      for (var i2 = 0, list2 = node2.specifiers; i2 < list2.length; i2 += 1) {
+      for (var i2 = 0, list2 = node.specifiers; i2 < list2.length; i2 += 1) {
         var spec = list2[i2];
         this.checkUnreserved(spec.local);
         this.checkLocalExport(spec.local);
@@ -3542,16 +1747,16 @@ pp$8.parseExport = function(node2, exports$1) {
           this.raise(spec.local.start, "A string literal cannot be used as an exported binding without `from`.");
         }
       }
-      node2.source = null;
+      node.source = null;
       if (this.options.ecmaVersion >= 16) {
-        node2.attributes = [];
+        node.attributes = [];
       }
     }
     this.semicolon();
   }
-  return this.finishNode(node2, "ExportNamedDeclaration");
+  return this.finishNode(node, "ExportNamedDeclaration");
 };
-pp$8.parseExportDeclaration = function(node2) {
+pp$8.parseExportDeclaration = function(node) {
   return this.parseStatement(null);
 };
 pp$8.parseExportDefaultDeclaration = function() {
@@ -3567,9 +1772,9 @@ pp$8.parseExportDefaultDeclaration = function() {
     var cNode = this.startNode();
     return this.parseClass(cNode, "nullableID");
   } else {
-    var declaration = this.parseMaybeAssign();
+    var declaration2 = this.parseMaybeAssign();
     this.semicolon();
-    return declaration;
+    return declaration2;
   }
 };
 pp$8.checkExport = function(exports$1, name, pos) {
@@ -3621,15 +1826,15 @@ pp$8.shouldParseExportStatement = function() {
   return this.type.keyword === "var" || this.type.keyword === "const" || this.type.keyword === "class" || this.type.keyword === "function" || this.isLet() || this.isAsyncFunction();
 };
 pp$8.parseExportSpecifier = function(exports$1) {
-  var node2 = this.startNode();
-  node2.local = this.parseModuleExportName();
-  node2.exported = this.eatContextual("as") ? this.parseModuleExportName() : node2.local;
+  var node = this.startNode();
+  node.local = this.parseModuleExportName();
+  node.exported = this.eatContextual("as") ? this.parseModuleExportName() : node.local;
   this.checkExport(
     exports$1,
-    node2.exported,
-    node2.exported.start
+    node.exported,
+    node.exported.start
   );
-  return this.finishNode(node2, "ExportSpecifier");
+  return this.finishNode(node, "ExportSpecifier");
 };
 pp$8.parseExportSpecifiers = function(exports$1) {
   var nodes = [], first = true;
@@ -3647,47 +1852,47 @@ pp$8.parseExportSpecifiers = function(exports$1) {
   }
   return nodes;
 };
-pp$8.parseImport = function(node2) {
+pp$8.parseImport = function(node) {
   this.next();
   if (this.type === types$1.string) {
-    node2.specifiers = empty$1;
-    node2.source = this.parseExprAtom();
+    node.specifiers = empty$1;
+    node.source = this.parseExprAtom();
   } else {
-    node2.specifiers = this.parseImportSpecifiers();
+    node.specifiers = this.parseImportSpecifiers();
     this.expectContextual("from");
-    node2.source = this.type === types$1.string ? this.parseExprAtom() : this.unexpected();
+    node.source = this.type === types$1.string ? this.parseExprAtom() : this.unexpected();
   }
   if (this.options.ecmaVersion >= 16) {
-    node2.attributes = this.parseWithClause();
+    node.attributes = this.parseWithClause();
   }
   this.semicolon();
-  return this.finishNode(node2, "ImportDeclaration");
+  return this.finishNode(node, "ImportDeclaration");
 };
 pp$8.parseImportSpecifier = function() {
-  var node2 = this.startNode();
-  node2.imported = this.parseModuleExportName();
+  var node = this.startNode();
+  node.imported = this.parseModuleExportName();
   if (this.eatContextual("as")) {
-    node2.local = this.parseIdent();
+    node.local = this.parseIdent();
   } else {
-    this.checkUnreserved(node2.imported);
-    node2.local = node2.imported;
+    this.checkUnreserved(node.imported);
+    node.local = node.imported;
   }
-  this.checkLValSimple(node2.local, BIND_LEXICAL);
-  return this.finishNode(node2, "ImportSpecifier");
+  this.checkLValSimple(node.local, BIND_LEXICAL);
+  return this.finishNode(node, "ImportSpecifier");
 };
 pp$8.parseImportDefaultSpecifier = function() {
-  var node2 = this.startNode();
-  node2.local = this.parseIdent();
-  this.checkLValSimple(node2.local, BIND_LEXICAL);
-  return this.finishNode(node2, "ImportDefaultSpecifier");
+  var node = this.startNode();
+  node.local = this.parseIdent();
+  this.checkLValSimple(node.local, BIND_LEXICAL);
+  return this.finishNode(node, "ImportDefaultSpecifier");
 };
 pp$8.parseImportNamespaceSpecifier = function() {
-  var node2 = this.startNode();
+  var node = this.startNode();
   this.next();
   this.expectContextual("as");
-  node2.local = this.parseIdent();
-  this.checkLValSimple(node2.local, BIND_LEXICAL);
-  return this.finishNode(node2, "ImportNamespaceSpecifier");
+  node.local = this.parseIdent();
+  this.checkLValSimple(node.local, BIND_LEXICAL);
+  return this.finishNode(node, "ImportNamespaceSpecifier");
 };
 pp$8.parseImportSpecifiers = function() {
   var nodes = [], first = true;
@@ -3743,14 +1948,14 @@ pp$8.parseWithClause = function() {
   return nodes;
 };
 pp$8.parseImportAttribute = function() {
-  var node2 = this.startNode();
-  node2.key = this.type === types$1.string ? this.parseExprAtom() : this.parseIdent(this.options.allowReserved !== "never");
+  var node = this.startNode();
+  node.key = this.type === types$1.string ? this.parseExprAtom() : this.parseIdent(this.options.allowReserved !== "never");
   this.expect(types$1.colon);
   if (this.type !== types$1.string) {
     this.unexpected();
   }
-  node2.value = this.parseExprAtom();
-  return this.finishNode(node2, "ImportAttribute");
+  node.value = this.parseExprAtom();
+  return this.finishNode(node, "ImportAttribute");
 };
 pp$8.parseModuleExportName = function() {
   if (this.options.ecmaVersion >= 13 && this.type === types$1.string) {
@@ -3772,12 +1977,12 @@ pp$8.isDirectiveCandidate = function(statement) {
   (this.input[statement.start] === '"' || this.input[statement.start] === "'");
 };
 var pp$7 = Parser.prototype;
-pp$7.toAssignable = function(node2, isBinding, refDestructuringErrors) {
-  if (this.options.ecmaVersion >= 6 && node2) {
-    switch (node2.type) {
+pp$7.toAssignable = function(node, isBinding, refDestructuringErrors) {
+  if (this.options.ecmaVersion >= 6 && node) {
+    switch (node.type) {
       case "Identifier":
-        if (this.inAsync && node2.name === "await") {
-          this.raise(node2.start, "Cannot use 'await' as identifier inside an async function");
+        if (this.inAsync && node.name === "await") {
+          this.raise(node.start, "Cannot use 'await' as identifier inside an async function");
         }
         break;
       case "ObjectPattern":
@@ -3786,11 +1991,11 @@ pp$7.toAssignable = function(node2, isBinding, refDestructuringErrors) {
       case "RestElement":
         break;
       case "ObjectExpression":
-        node2.type = "ObjectPattern";
+        node.type = "ObjectPattern";
         if (refDestructuringErrors) {
           this.checkPatternErrors(refDestructuringErrors, true);
         }
-        for (var i2 = 0, list2 = node2.properties; i2 < list2.length; i2 += 1) {
+        for (var i2 = 0, list2 = node.properties; i2 < list2.length; i2 += 1) {
           var prop = list2[i2];
           this.toAssignable(prop, isBinding);
           if (prop.type === "RestElement" && (prop.argument.type === "ArrayPattern" || prop.argument.type === "ObjectPattern")) {
@@ -3799,50 +2004,50 @@ pp$7.toAssignable = function(node2, isBinding, refDestructuringErrors) {
         }
         break;
       case "Property":
-        if (node2.kind !== "init") {
-          this.raise(node2.key.start, "Object pattern can't contain getter or setter");
+        if (node.kind !== "init") {
+          this.raise(node.key.start, "Object pattern can't contain getter or setter");
         }
-        this.toAssignable(node2.value, isBinding);
+        this.toAssignable(node.value, isBinding);
         break;
       case "ArrayExpression":
-        node2.type = "ArrayPattern";
+        node.type = "ArrayPattern";
         if (refDestructuringErrors) {
           this.checkPatternErrors(refDestructuringErrors, true);
         }
-        this.toAssignableList(node2.elements, isBinding);
+        this.toAssignableList(node.elements, isBinding);
         break;
       case "SpreadElement":
-        node2.type = "RestElement";
-        this.toAssignable(node2.argument, isBinding);
-        if (node2.argument.type === "AssignmentPattern") {
-          this.raise(node2.argument.start, "Rest elements cannot have a default value");
+        node.type = "RestElement";
+        this.toAssignable(node.argument, isBinding);
+        if (node.argument.type === "AssignmentPattern") {
+          this.raise(node.argument.start, "Rest elements cannot have a default value");
         }
         break;
       case "AssignmentExpression":
-        if (node2.operator !== "=") {
-          this.raise(node2.left.end, "Only '=' operator can be used for specifying default value.");
+        if (node.operator !== "=") {
+          this.raise(node.left.end, "Only '=' operator can be used for specifying default value.");
         }
-        node2.type = "AssignmentPattern";
-        delete node2.operator;
-        this.toAssignable(node2.left, isBinding);
+        node.type = "AssignmentPattern";
+        delete node.operator;
+        this.toAssignable(node.left, isBinding);
         break;
       case "ParenthesizedExpression":
-        this.toAssignable(node2.expression, isBinding, refDestructuringErrors);
+        this.toAssignable(node.expression, isBinding, refDestructuringErrors);
         break;
       case "ChainExpression":
-        this.raiseRecoverable(node2.start, "Optional chaining cannot appear in left-hand side");
+        this.raiseRecoverable(node.start, "Optional chaining cannot appear in left-hand side");
         break;
       case "MemberExpression":
         if (!isBinding) {
           break;
         }
       default:
-        this.raise(node2.start, "Assigning to rvalue");
+        this.raise(node.start, "Assigning to rvalue");
     }
   } else if (refDestructuringErrors) {
     this.checkPatternErrors(refDestructuringErrors, true);
   }
-  return node2;
+  return node;
 };
 pp$7.toAssignableList = function(exprList, isBinding) {
   var end = exprList.length;
@@ -3861,28 +2066,28 @@ pp$7.toAssignableList = function(exprList, isBinding) {
   return exprList;
 };
 pp$7.parseSpread = function(refDestructuringErrors) {
-  var node2 = this.startNode();
+  var node = this.startNode();
   this.next();
-  node2.argument = this.parseMaybeAssign(false, refDestructuringErrors);
-  return this.finishNode(node2, "SpreadElement");
+  node.argument = this.parseMaybeAssign(false, refDestructuringErrors);
+  return this.finishNode(node, "SpreadElement");
 };
 pp$7.parseRestBinding = function() {
-  var node2 = this.startNode();
+  var node = this.startNode();
   this.next();
   if (this.options.ecmaVersion === 6 && this.type !== types$1.name) {
     this.unexpected();
   }
-  node2.argument = this.parseBindingAtom();
-  return this.finishNode(node2, "RestElement");
+  node.argument = this.parseBindingAtom();
+  return this.finishNode(node, "RestElement");
 };
 pp$7.parseBindingAtom = function() {
   if (this.options.ecmaVersion >= 6) {
     switch (this.type) {
       case types$1.bracketL:
-        var node2 = this.startNode();
+        var node = this.startNode();
         this.next();
-        node2.elements = this.parseBindingList(types$1.bracketR, true, true);
-        return this.finishNode(node2, "ArrayPattern");
+        node.elements = this.parseBindingList(types$1.bracketR, true, true);
+        return this.finishNode(node, "ArrayPattern");
       case types$1.braceL:
         return this.parseObj(true);
     }
@@ -3929,10 +2134,10 @@ pp$7.parseMaybeDefault = function(startPos, startLoc, left) {
   if (this.options.ecmaVersion < 6 || !this.eat(types$1.eq)) {
     return left;
   }
-  var node2 = this.startNodeAt(startPos, startLoc);
-  node2.left = left;
-  node2.right = this.parseMaybeAssign();
-  return this.finishNode(node2, "AssignmentPattern");
+  var node = this.startNodeAt(startPos, startLoc);
+  node.left = left;
+  node.right = this.parseMaybeAssign();
+  return this.finishNode(node, "AssignmentPattern");
 };
 pp$7.checkLValSimple = function(expr, bindingType, checkClashes) {
   if (bindingType === void 0) bindingType = BIND_NONE;
@@ -4216,12 +2421,12 @@ pp$5.parseExpression = function(forInit, refDestructuringErrors) {
     var startPos = this$1$1.start, startLoc = this$1$1.startLoc;
     var expr = this$1$1.parseMaybeAssign(forInit, refDestructuringErrors);
     if (this$1$1.type === types$1.comma) {
-      var node2 = this$1$1.startNodeAt(startPos, startLoc);
-      node2.expressions = [expr];
+      var node = this$1$1.startNodeAt(startPos, startLoc);
+      node.expressions = [expr];
       while (this$1$1.eat(types$1.comma)) {
-        node2.expressions.push(this$1$1.parseMaybeAssign(forInit, refDestructuringErrors));
+        node.expressions.push(this$1$1.parseMaybeAssign(forInit, refDestructuringErrors));
       }
-      return this$1$1.finishNode(node2, "SequenceExpression");
+      return this$1$1.finishNode(node, "SequenceExpression");
     }
     return expr;
   });
@@ -4254,8 +2459,8 @@ pp$5.parseMaybeAssign = function(forInit, refDestructuringErrors, afterLeftParse
     left = afterLeftParse.call(this, left, startPos, startLoc);
   }
   if (this.type.isAssign) {
-    var node2 = this.startNodeAt(startPos, startLoc);
-    node2.operator = this.value;
+    var node = this.startNodeAt(startPos, startLoc);
+    node.operator = this.value;
     if (this.type === types$1.eq) {
       left = this.toAssignable(left, false, refDestructuringErrors);
     }
@@ -4270,13 +2475,13 @@ pp$5.parseMaybeAssign = function(forInit, refDestructuringErrors, afterLeftParse
     } else {
       this.checkLValSimple(left);
     }
-    node2.left = left;
+    node.left = left;
     this.next();
-    node2.right = this.parseMaybeAssign(forInit);
+    node.right = this.parseMaybeAssign(forInit);
     if (oldDoubleProto > -1) {
       refDestructuringErrors.doubleProto = oldDoubleProto;
     }
-    return this.finishNode(node2, "AssignmentExpression");
+    return this.finishNode(node, "AssignmentExpression");
   } else {
     if (ownDestructuringErrors) {
       this.checkExpressionErrors(refDestructuringErrors, true);
@@ -4297,12 +2502,12 @@ pp$5.parseMaybeConditional = function(forInit, refDestructuringErrors) {
     return expr;
   }
   if (!(expr.type === "ArrowFunctionExpression" && expr.start === startPos) && this.eat(types$1.question)) {
-    var node2 = this.startNodeAt(startPos, startLoc);
-    node2.test = expr;
-    node2.consequent = this.parseMaybeAssign();
+    var node = this.startNodeAt(startPos, startLoc);
+    node.test = expr;
+    node.consequent = this.parseMaybeAssign();
     this.expect(types$1.colon);
-    node2.alternate = this.parseMaybeAssign(forInit);
-    return this.finishNode(node2, "ConditionalExpression");
+    node.alternate = this.parseMaybeAssign(forInit);
+    return this.finishNode(node, "ConditionalExpression");
   }
   return expr;
 };
@@ -4327,11 +2532,11 @@ pp$5.parseExprOp = function(left, leftStartPos, leftStartLoc, minPrec, forInit) 
       this.next();
       var startPos = this.start, startLoc = this.startLoc;
       var right = this.parseExprOp(this.parseMaybeUnary(null, false, false, forInit), startPos, startLoc, prec, forInit);
-      var node2 = this.buildBinary(leftStartPos, leftStartLoc, left, right, op, logical || coalesce);
+      var node = this.buildBinary(leftStartPos, leftStartLoc, left, right, op, logical || coalesce);
       if (logical && this.type === types$1.coalesce || coalesce && (this.type === types$1.logicalOR || this.type === types$1.logicalAND)) {
         this.raiseRecoverable(this.start, "Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses");
       }
-      return this.parseExprOp(node2, leftStartPos, leftStartLoc, minPrec, forInit);
+      return this.parseExprOp(node, leftStartPos, leftStartLoc, minPrec, forInit);
     }
   }
   return left;
@@ -4340,11 +2545,11 @@ pp$5.buildBinary = function(startPos, startLoc, left, right, op, logical) {
   if (right.type === "PrivateIdentifier") {
     this.raise(right.start, "Private identifier can only be left side of binary expression");
   }
-  var node2 = this.startNodeAt(startPos, startLoc);
-  node2.left = left;
-  node2.operator = op;
-  node2.right = right;
-  return this.finishNode(node2, logical ? "LogicalExpression" : "BinaryExpression");
+  var node = this.startNodeAt(startPos, startLoc);
+  node.left = left;
+  node.operator = op;
+  node.right = right;
+  return this.finishNode(node, logical ? "LogicalExpression" : "BinaryExpression");
 };
 pp$5.parseMaybeUnary = function(refDestructuringErrors, sawUnary, incDec, forInit) {
   var startPos = this.start, startLoc = this.startLoc, expr;
@@ -4352,22 +2557,22 @@ pp$5.parseMaybeUnary = function(refDestructuringErrors, sawUnary, incDec, forIni
     expr = this.parseAwait(forInit);
     sawUnary = true;
   } else if (this.type.prefix) {
-    var node2 = this.startNode(), update = this.type === types$1.incDec;
-    node2.operator = this.value;
-    node2.prefix = true;
+    var node = this.startNode(), update = this.type === types$1.incDec;
+    node.operator = this.value;
+    node.prefix = true;
     this.next();
-    node2.argument = this.parseMaybeUnary(null, true, update, forInit);
+    node.argument = this.parseMaybeUnary(null, true, update, forInit);
     this.checkExpressionErrors(refDestructuringErrors, true);
     if (update) {
-      this.checkLValSimple(node2.argument);
-    } else if (this.strict && node2.operator === "delete" && isLocalVariableAccess(node2.argument)) {
-      this.raiseRecoverable(node2.start, "Deleting local variable in strict mode");
-    } else if (node2.operator === "delete" && isPrivateFieldAccess(node2.argument)) {
-      this.raiseRecoverable(node2.start, "Private fields can not be deleted");
+      this.checkLValSimple(node.argument);
+    } else if (this.strict && node.operator === "delete" && isLocalVariableAccess(node.argument)) {
+      this.raiseRecoverable(node.start, "Deleting local variable in strict mode");
+    } else if (node.operator === "delete" && isPrivateFieldAccess(node.argument)) {
+      this.raiseRecoverable(node.start, "Private fields can not be deleted");
     } else {
       sawUnary = true;
     }
-    expr = this.finishNode(node2, update ? "UpdateExpression" : "UnaryExpression");
+    expr = this.finishNode(node, update ? "UpdateExpression" : "UnaryExpression");
   } else if (!sawUnary && this.type === types$1.privateId) {
     if ((forInit || this.privateNameStack.length === 0) && this.options.checkPrivateFields) {
       this.unexpected();
@@ -4401,11 +2606,11 @@ pp$5.parseMaybeUnary = function(refDestructuringErrors, sawUnary, incDec, forIni
     return expr;
   }
 };
-function isLocalVariableAccess(node2) {
-  return node2.type === "Identifier" || node2.type === "ParenthesizedExpression" && isLocalVariableAccess(node2.expression);
+function isLocalVariableAccess(node) {
+  return node.type === "Identifier" || node.type === "ParenthesizedExpression" && isLocalVariableAccess(node.expression);
 }
-function isPrivateFieldAccess(node2) {
-  return node2.type === "MemberExpression" && node2.property.type === "PrivateIdentifier" || node2.type === "ChainExpression" && isPrivateFieldAccess(node2.expression) || node2.type === "ParenthesizedExpression" && isPrivateFieldAccess(node2.expression);
+function isPrivateFieldAccess(node) {
+  return node.type === "MemberExpression" && node.property.type === "PrivateIdentifier" || node.type === "ChainExpression" && isPrivateFieldAccess(node.expression) || node.type === "ParenthesizedExpression" && isPrivateFieldAccess(node.expression);
 }
 pp$5.parseExprSubscripts = function(refDestructuringErrors, forInit) {
   var startPos = this.start, startLoc = this.startLoc;
@@ -4460,21 +2665,21 @@ pp$5.parseSubscript = function(base, startPos, startLoc, noCalls, maybeAsyncArro
   }
   var computed = this.eat(types$1.bracketL);
   if (computed || optional && this.type !== types$1.parenL && this.type !== types$1.backQuote || this.eat(types$1.dot)) {
-    var node2 = this.startNodeAt(startPos, startLoc);
-    node2.object = base;
+    var node = this.startNodeAt(startPos, startLoc);
+    node.object = base;
     if (computed) {
-      node2.property = this.parseExpression();
+      node.property = this.parseExpression();
       this.expect(types$1.bracketR);
     } else if (this.type === types$1.privateId && base.type !== "Super") {
-      node2.property = this.parsePrivateIdent();
+      node.property = this.parsePrivateIdent();
     } else {
-      node2.property = this.parseIdent(this.options.allowReserved !== "never");
+      node.property = this.parseIdent(this.options.allowReserved !== "never");
     }
-    node2.computed = !!computed;
+    node.computed = !!computed;
     if (optionalSupported) {
-      node2.optional = optional;
+      node.optional = optional;
     }
-    base = this.finishNode(node2, "MemberExpression");
+    base = this.finishNode(node, "MemberExpression");
   } else if (!noCalls && this.eat(types$1.parenL)) {
     var refDestructuringErrors = new DestructuringErrors(), oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, oldAwaitIdentPos = this.awaitIdentPos;
     this.yieldPos = 0;
@@ -4518,25 +2723,25 @@ pp$5.parseExprAtom = function(refDestructuringErrors, forInit, forNew) {
   if (this.type === types$1.slash) {
     this.readRegexp();
   }
-  var node2, canBeArrow = this.potentialArrowAt === this.start;
+  var node, canBeArrow = this.potentialArrowAt === this.start;
   switch (this.type) {
     case types$1._super:
       if (!this.allowSuper) {
         this.raise(this.start, "'super' keyword outside a method");
       }
-      node2 = this.startNode();
+      node = this.startNode();
       this.next();
       if (this.type === types$1.parenL && !this.allowDirectSuper) {
-        this.raise(node2.start, "super() call outside constructor of a subclass");
+        this.raise(node.start, "super() call outside constructor of a subclass");
       }
       if (this.type !== types$1.dot && this.type !== types$1.bracketL && this.type !== types$1.parenL) {
         this.unexpected();
       }
-      return this.finishNode(node2, "Super");
+      return this.finishNode(node, "Super");
     case types$1._this:
-      node2 = this.startNode();
+      node = this.startNode();
       this.next();
-      return this.finishNode(node2, "ThisExpression");
+      return this.finishNode(node, "ThisExpression");
     case types$1.name:
       var startPos = this.start, startLoc = this.startLoc, containsEsc = this.containsEsc;
       var id = this.parseIdent(false);
@@ -4559,20 +2764,20 @@ pp$5.parseExprAtom = function(refDestructuringErrors, forInit, forNew) {
       return id;
     case types$1.regexp:
       var value = this.value;
-      node2 = this.parseLiteral(value.value);
-      node2.regex = { pattern: value.pattern, flags: value.flags };
-      return node2;
+      node = this.parseLiteral(value.value);
+      node.regex = { pattern: value.pattern, flags: value.flags };
+      return node;
     case types$1.num:
     case types$1.string:
       return this.parseLiteral(this.value);
     case types$1._null:
     case types$1._true:
     case types$1._false:
-      node2 = this.startNode();
-      node2.value = this.type === types$1._null ? null : this.type === types$1._true;
-      node2.raw = this.type.keyword;
+      node = this.startNode();
+      node.value = this.type === types$1._null ? null : this.type === types$1._true;
+      node.raw = this.type.keyword;
       this.next();
-      return this.finishNode(node2, "Literal");
+      return this.finishNode(node, "Literal");
     case types$1.parenL:
       var start = this.start, expr = this.parseParenAndDistinguishExpression(canBeArrow, forInit);
       if (refDestructuringErrors) {
@@ -4585,17 +2790,17 @@ pp$5.parseExprAtom = function(refDestructuringErrors, forInit, forNew) {
       }
       return expr;
     case types$1.bracketL:
-      node2 = this.startNode();
+      node = this.startNode();
       this.next();
-      node2.elements = this.parseExprList(types$1.bracketR, true, true, refDestructuringErrors);
-      return this.finishNode(node2, "ArrayExpression");
+      node.elements = this.parseExprList(types$1.bracketR, true, true, refDestructuringErrors);
+      return this.finishNode(node, "ArrayExpression");
     case types$1.braceL:
       this.overrideContext(types.b_expr);
       return this.parseObj(false, refDestructuringErrors);
     case types$1._function:
-      node2 = this.startNode();
+      node = this.startNode();
       this.next();
-      return this.parseFunction(node2, 0);
+      return this.parseFunction(node, 0);
     case types$1._class:
       return this.parseClass(this.startNode(), false);
     case types$1._new:
@@ -4616,30 +2821,30 @@ pp$5.parseExprAtomDefault = function() {
   this.unexpected();
 };
 pp$5.parseExprImport = function(forNew) {
-  var node2 = this.startNode();
+  var node = this.startNode();
   if (this.containsEsc) {
     this.raiseRecoverable(this.start, "Escape sequence in keyword import");
   }
   this.next();
   if (this.type === types$1.parenL && !forNew) {
-    return this.parseDynamicImport(node2);
+    return this.parseDynamicImport(node);
   } else if (this.type === types$1.dot) {
-    var meta = this.startNodeAt(node2.start, node2.loc && node2.loc.start);
+    var meta = this.startNodeAt(node.start, node.loc && node.loc.start);
     meta.name = "import";
-    node2.meta = this.finishNode(meta, "Identifier");
-    return this.parseImportMeta(node2);
+    node.meta = this.finishNode(meta, "Identifier");
+    return this.parseImportMeta(node);
   } else {
     this.unexpected();
   }
 };
-pp$5.parseDynamicImport = function(node2) {
+pp$5.parseDynamicImport = function(node) {
   this.next();
-  node2.source = this.parseMaybeAssign();
+  node.source = this.parseMaybeAssign();
   if (this.options.ecmaVersion >= 16) {
     if (!this.eat(types$1.parenR)) {
       this.expect(types$1.comma);
       if (!this.afterTrailingComma(types$1.parenR)) {
-        node2.options = this.parseMaybeAssign();
+        node.options = this.parseMaybeAssign();
         if (!this.eat(types$1.parenR)) {
           this.expect(types$1.comma);
           if (!this.afterTrailingComma(types$1.parenR)) {
@@ -4647,10 +2852,10 @@ pp$5.parseDynamicImport = function(node2) {
           }
         }
       } else {
-        node2.options = null;
+        node.options = null;
       }
     } else {
-      node2.options = null;
+      node.options = null;
     }
   } else {
     if (!this.eat(types$1.parenR)) {
@@ -4662,32 +2867,32 @@ pp$5.parseDynamicImport = function(node2) {
       }
     }
   }
-  return this.finishNode(node2, "ImportExpression");
+  return this.finishNode(node, "ImportExpression");
 };
-pp$5.parseImportMeta = function(node2) {
+pp$5.parseImportMeta = function(node) {
   this.next();
   var containsEsc = this.containsEsc;
-  node2.property = this.parseIdent(true);
-  if (node2.property.name !== "meta") {
-    this.raiseRecoverable(node2.property.start, "The only valid meta property for import is 'import.meta'");
+  node.property = this.parseIdent(true);
+  if (node.property.name !== "meta") {
+    this.raiseRecoverable(node.property.start, "The only valid meta property for import is 'import.meta'");
   }
   if (containsEsc) {
-    this.raiseRecoverable(node2.start, "'import.meta' must not contain escaped characters");
+    this.raiseRecoverable(node.start, "'import.meta' must not contain escaped characters");
   }
   if (this.options.sourceType !== "module" && !this.options.allowImportExportEverywhere) {
-    this.raiseRecoverable(node2.start, "Cannot use 'import.meta' outside a module");
+    this.raiseRecoverable(node.start, "Cannot use 'import.meta' outside a module");
   }
-  return this.finishNode(node2, "MetaProperty");
+  return this.finishNode(node, "MetaProperty");
 };
 pp$5.parseLiteral = function(value) {
-  var node2 = this.startNode();
-  node2.value = value;
-  node2.raw = this.input.slice(this.start, this.end);
-  if (node2.raw.charCodeAt(node2.raw.length - 1) === 110) {
-    node2.bigint = node2.value != null ? node2.value.toString() : node2.raw.slice(0, -1).replace(/_/g, "");
+  var node = this.startNode();
+  node.value = value;
+  node.raw = this.input.slice(this.start, this.end);
+  if (node.raw.charCodeAt(node.raw.length - 1) === 110) {
+    node.bigint = node.value != null ? node.value.toString() : node.raw.slice(0, -1).replace(/_/g, "");
   }
   this.next();
-  return this.finishNode(node2, "Literal");
+  return this.finishNode(node, "Literal");
 };
 pp$5.parseParenExpression = function() {
   this.expect(types$1.parenL);
@@ -4773,37 +2978,37 @@ pp$5.parseNew = function() {
   if (this.containsEsc) {
     this.raiseRecoverable(this.start, "Escape sequence in keyword new");
   }
-  var node2 = this.startNode();
+  var node = this.startNode();
   this.next();
   if (this.options.ecmaVersion >= 6 && this.type === types$1.dot) {
-    var meta = this.startNodeAt(node2.start, node2.loc && node2.loc.start);
+    var meta = this.startNodeAt(node.start, node.loc && node.loc.start);
     meta.name = "new";
-    node2.meta = this.finishNode(meta, "Identifier");
+    node.meta = this.finishNode(meta, "Identifier");
     this.next();
     var containsEsc = this.containsEsc;
-    node2.property = this.parseIdent(true);
-    if (node2.property.name !== "target") {
-      this.raiseRecoverable(node2.property.start, "The only valid meta property for new is 'new.target'");
+    node.property = this.parseIdent(true);
+    if (node.property.name !== "target") {
+      this.raiseRecoverable(node.property.start, "The only valid meta property for new is 'new.target'");
     }
     if (containsEsc) {
-      this.raiseRecoverable(node2.start, "'new.target' must not contain escaped characters");
+      this.raiseRecoverable(node.start, "'new.target' must not contain escaped characters");
     }
     if (!this.allowNewDotTarget) {
-      this.raiseRecoverable(node2.start, "'new.target' can only be used in functions and class static block");
+      this.raiseRecoverable(node.start, "'new.target' can only be used in functions and class static block");
     }
-    return this.finishNode(node2, "MetaProperty");
+    return this.finishNode(node, "MetaProperty");
   }
   var startPos = this.start, startLoc = this.startLoc;
-  node2.callee = this.parseSubscripts(this.parseExprAtom(null, false, true), startPos, startLoc, true, false);
-  if (node2.callee.type === "Super") {
+  node.callee = this.parseSubscripts(this.parseExprAtom(null, false, true), startPos, startLoc, true, false);
+  if (node.callee.type === "Super") {
     this.raiseRecoverable(startPos, "Invalid use of 'super'");
   }
   if (this.eat(types$1.parenL)) {
-    node2.arguments = this.parseExprList(types$1.parenR, this.options.ecmaVersion >= 8, false);
+    node.arguments = this.parseExprList(types$1.parenR, this.options.ecmaVersion >= 8, false);
   } else {
-    node2.arguments = empty;
+    node.arguments = empty;
   }
-  return this.finishNode(node2, "NewExpression");
+  return this.finishNode(node, "NewExpression");
 };
 pp$5.parseTemplateElement = function(ref2) {
   var isTagged = ref2.isTagged;
@@ -4830,29 +3035,29 @@ pp$5.parseTemplate = function(ref2) {
   if (ref2 === void 0) ref2 = {};
   var isTagged = ref2.isTagged;
   if (isTagged === void 0) isTagged = false;
-  var node2 = this.startNode();
+  var node = this.startNode();
   this.next();
-  node2.expressions = [];
+  node.expressions = [];
   var curElt = this.parseTemplateElement({ isTagged });
-  node2.quasis = [curElt];
+  node.quasis = [curElt];
   while (!curElt.tail) {
     if (this.type === types$1.eof) {
       this.raise(this.pos, "Unterminated template literal");
     }
     this.expect(types$1.dollarBraceL);
-    node2.expressions.push(this.parseExpression());
+    node.expressions.push(this.parseExpression());
     this.expect(types$1.braceR);
-    node2.quasis.push(curElt = this.parseTemplateElement({ isTagged }));
+    node.quasis.push(curElt = this.parseTemplateElement({ isTagged }));
   }
   this.next();
-  return this.finishNode(node2, "TemplateLiteral");
+  return this.finishNode(node, "TemplateLiteral");
 };
 pp$5.isAsyncProp = function(prop) {
   return !prop.computed && prop.key.type === "Identifier" && prop.key.name === "async" && (this.type === types$1.name || this.type === types$1.num || this.type === types$1.string || this.type === types$1.bracketL || this.type.keyword || this.options.ecmaVersion >= 9 && this.type === types$1.star) && !lineBreak.test(this.input.slice(this.lastTokEnd, this.start));
 };
 pp$5.parseObj = function(isPattern, refDestructuringErrors) {
-  var node2 = this.startNode(), first = true, propHash = {};
-  node2.properties = [];
+  var node = this.startNode(), first = true, propHash = {};
+  node.properties = [];
   this.next();
   while (!this.eat(types$1.braceR)) {
     if (!first) {
@@ -4867,9 +3072,9 @@ pp$5.parseObj = function(isPattern, refDestructuringErrors) {
     if (!isPattern) {
       this.checkPropClash(prop, propHash, refDestructuringErrors);
     }
-    node2.properties.push(prop);
+    node.properties.push(prop);
   }
-  return this.finishNode(node2, isPattern ? "ObjectPattern" : "ObjectExpression");
+  return this.finishNode(node, isPattern ? "ObjectPattern" : "ObjectExpression");
 };
 pp$5.parseProperty = function(isPattern, refDestructuringErrors) {
   var prop = this.startNode(), isGenerator, isAsync, startPos, startLoc;
@@ -4985,67 +3190,67 @@ pp$5.parsePropertyName = function(prop) {
   }
   return prop.key = this.type === types$1.num || this.type === types$1.string ? this.parseExprAtom() : this.parseIdent(this.options.allowReserved !== "never");
 };
-pp$5.initFunction = function(node2) {
-  node2.id = null;
+pp$5.initFunction = function(node) {
+  node.id = null;
   if (this.options.ecmaVersion >= 6) {
-    node2.generator = node2.expression = false;
+    node.generator = node.expression = false;
   }
   if (this.options.ecmaVersion >= 8) {
-    node2.async = false;
+    node.async = false;
   }
 };
 pp$5.parseMethod = function(isGenerator, isAsync, allowDirectSuper) {
-  var node2 = this.startNode(), oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, oldAwaitIdentPos = this.awaitIdentPos;
-  this.initFunction(node2);
+  var node = this.startNode(), oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, oldAwaitIdentPos = this.awaitIdentPos;
+  this.initFunction(node);
   if (this.options.ecmaVersion >= 6) {
-    node2.generator = isGenerator;
+    node.generator = isGenerator;
   }
   if (this.options.ecmaVersion >= 8) {
-    node2.async = !!isAsync;
+    node.async = !!isAsync;
   }
   this.yieldPos = 0;
   this.awaitPos = 0;
   this.awaitIdentPos = 0;
-  this.enterScope(functionFlags(isAsync, node2.generator) | SCOPE_SUPER | (allowDirectSuper ? SCOPE_DIRECT_SUPER : 0));
+  this.enterScope(functionFlags(isAsync, node.generator) | SCOPE_SUPER | (allowDirectSuper ? SCOPE_DIRECT_SUPER : 0));
   this.expect(types$1.parenL);
-  node2.params = this.parseBindingList(types$1.parenR, false, this.options.ecmaVersion >= 8);
+  node.params = this.parseBindingList(types$1.parenR, false, this.options.ecmaVersion >= 8);
   this.checkYieldAwaitInDefaultParams();
-  this.parseFunctionBody(node2, false, true, false);
+  this.parseFunctionBody(node, false, true, false);
   this.yieldPos = oldYieldPos;
   this.awaitPos = oldAwaitPos;
   this.awaitIdentPos = oldAwaitIdentPos;
-  return this.finishNode(node2, "FunctionExpression");
+  return this.finishNode(node, "FunctionExpression");
 };
-pp$5.parseArrowExpression = function(node2, params, isAsync, forInit) {
+pp$5.parseArrowExpression = function(node, params, isAsync, forInit) {
   var oldYieldPos = this.yieldPos, oldAwaitPos = this.awaitPos, oldAwaitIdentPos = this.awaitIdentPos;
   this.enterScope(functionFlags(isAsync, false) | SCOPE_ARROW);
-  this.initFunction(node2);
+  this.initFunction(node);
   if (this.options.ecmaVersion >= 8) {
-    node2.async = !!isAsync;
+    node.async = !!isAsync;
   }
   this.yieldPos = 0;
   this.awaitPos = 0;
   this.awaitIdentPos = 0;
-  node2.params = this.toAssignableList(params, true);
-  this.parseFunctionBody(node2, true, false, forInit);
+  node.params = this.toAssignableList(params, true);
+  this.parseFunctionBody(node, true, false, forInit);
   this.yieldPos = oldYieldPos;
   this.awaitPos = oldAwaitPos;
   this.awaitIdentPos = oldAwaitIdentPos;
-  return this.finishNode(node2, "ArrowFunctionExpression");
+  return this.finishNode(node, "ArrowFunctionExpression");
 };
-pp$5.parseFunctionBody = function(node2, isArrowFunction, isMethod, forInit) {
+pp$5.parseFunctionBody = function(node, isArrowFunction, isMethod, forInit) {
   var isExpression = isArrowFunction && this.type !== types$1.braceL;
   var oldStrict = this.strict, useStrict = false;
   if (isExpression) {
-    node2.body = this.parseMaybeAssign(forInit);
-    node2.expression = true;
-    this.checkParams(node2, false);
+    node.body = this.parseMaybeAssign(forInit);
+    node.expression = true;
+    this.checkParams(node, false);
   } else {
-    var nonSimple = this.options.ecmaVersion >= 7 && !this.isSimpleParamList(node2.params);
+    var nonSimple = this.options.ecmaVersion >= 7 && !this.isSimpleParamList(node.params);
     if (!oldStrict || nonSimple) {
       useStrict = this.strictDirective(this.end);
       if (useStrict && nonSimple) {
-        this.raiseRecoverable(node2.start, "Illegal 'use strict' directive in function with non-simple parameter list");
+        this.raiseRecoverable(node.start, "Illegal 'use strict' directive in function with non-simple parameter list");
       }
     }
     var oldLabels = this.labels;
@@ -5053,13 +3258,13 @@ pp$5.parseFunctionBody = function(node2, isArrowFunction, isMethod, forInit) {
     if (useStrict) {
       this.strict = true;
     }
-    this.checkParams(node2, !oldStrict && !useStrict && !isArrowFunction && !isMethod && this.isSimpleParamList(node2.params));
-    if (this.strict && node2.id) {
-      this.checkLValSimple(node2.id, BIND_OUTSIDE);
+    this.checkParams(node, !oldStrict && !useStrict && !isArrowFunction && !isMethod && this.isSimpleParamList(node.params));
+    if (this.strict && node.id) {
+      this.checkLValSimple(node.id, BIND_OUTSIDE);
     }
-    node2.body = this.parseBlock(false, void 0, useStrict && !oldStrict);
-    node2.expression = false;
-    this.adaptDirectivePrologue(node2.body.body);
+    node.body = this.parseBlock(false, void 0, useStrict && !oldStrict);
+    node.expression = false;
+    this.adaptDirectivePrologue(node.body.body);
     this.labels = oldLabels;
   }
   this.exitScope();
@@ -5073,9 +3278,9 @@ pp$5.isSimpleParamList = function(params) {
   }
   return true;
 };
-pp$5.checkParams = function(node2, allowDuplicates) {
+pp$5.checkParams = function(node, allowDuplicates) {
   var nameHash = /* @__PURE__ */ Object.create(null);
-  for (var i2 = 0, list2 = node2.params; i2 < list2.length; i2 += 1) {
+  for (var i2 = 0, list2 = node.params; i2 < list2.length; i2 += 1) {
     var param = list2[i2];
     this.checkLValInnerPattern(param, BIND_VAR, allowDuplicates ? null : nameHash);
   }
@@ -5137,73 +3342,73 @@ pp$5.checkUnreserved = function(ref2) {
   }
 };
 pp$5.parseIdent = function(liberal) {
-  var node2 = this.parseIdentNode();
+  var node = this.parseIdentNode();
   this.next(!!liberal);
-  this.finishNode(node2, "Identifier");
+  this.finishNode(node, "Identifier");
   if (!liberal) {
-    this.checkUnreserved(node2);
-    if (node2.name === "await" && !this.awaitIdentPos) {
-      this.awaitIdentPos = node2.start;
+    this.checkUnreserved(node);
+    if (node.name === "await" && !this.awaitIdentPos) {
+      this.awaitIdentPos = node.start;
     }
   }
-  return node2;
+  return node;
 };
 pp$5.parseIdentNode = function() {
-  var node2 = this.startNode();
+  var node = this.startNode();
   if (this.type === types$1.name) {
-    node2.name = this.value;
+    node.name = this.value;
   } else if (this.type.keyword) {
-    node2.name = this.type.keyword;
-    if ((node2.name === "class" || node2.name === "function") && (this.lastTokEnd !== this.lastTokStart + 1 || this.input.charCodeAt(this.lastTokStart) !== 46)) {
+    node.name = this.type.keyword;
+    if ((node.name === "class" || node.name === "function") && (this.lastTokEnd !== this.lastTokStart + 1 || this.input.charCodeAt(this.lastTokStart) !== 46)) {
       this.context.pop();
     }
     this.type = types$1.name;
   } else {
     this.unexpected();
   }
-  return node2;
+  return node;
 };
 pp$5.parsePrivateIdent = function() {
-  var node2 = this.startNode();
+  var node = this.startNode();
   if (this.type === types$1.privateId) {
-    node2.name = this.value;
+    node.name = this.value;
   } else {
     this.unexpected();
   }
   this.next();
-  this.finishNode(node2, "PrivateIdentifier");
+  this.finishNode(node, "PrivateIdentifier");
   if (this.options.checkPrivateFields) {
     if (this.privateNameStack.length === 0) {
-      this.raise(node2.start, "Private field '#" + node2.name + "' must be declared in an enclosing class");
+      this.raise(node.start, "Private field '#" + node.name + "' must be declared in an enclosing class");
     } else {
-      this.privateNameStack[this.privateNameStack.length - 1].used.push(node2);
+      this.privateNameStack[this.privateNameStack.length - 1].used.push(node);
     }
   }
-  return node2;
+  return node;
 };
 pp$5.parseYield = function(forInit) {
   if (!this.yieldPos) {
     this.yieldPos = this.start;
   }
-  var node2 = this.startNode();
+  var node = this.startNode();
   this.next();
   if (this.type === types$1.semi || this.canInsertSemicolon() || this.type !== types$1.star && !this.type.startsExpr) {
-    node2.delegate = false;
-    node2.argument = null;
+    node.delegate = false;
+    node.argument = null;
   } else {
-    node2.delegate = this.eat(types$1.star);
-    node2.argument = this.parseMaybeAssign(forInit);
+    node.delegate = this.eat(types$1.star);
+    node.argument = this.parseMaybeAssign(forInit);
   }
-  return this.finishNode(node2, "YieldExpression");
+  return this.finishNode(node, "YieldExpression");
 };
 pp$5.parseAwait = function(forInit) {
   if (!this.awaitPos) {
     this.awaitPos = this.start;
   }
-  var node2 = this.startNode();
+  var node = this.startNode();
   this.next();
-  node2.argument = this.parseMaybeUnary(null, true, false, forInit);
-  return this.finishNode(node2, "AwaitExpression");
+  node.argument = this.parseMaybeUnary(null, true, false, forInit);
+  return this.finishNode(node, "AwaitExpression");
 };
 var pp$4 = Parser.prototype;
 pp$4.raise = function(pos, message) {
@@ -5325,27 +3530,27 @@ pp$2.startNode = function() {
 pp$2.startNodeAt = function(pos, loc) {
   return new Node(this, pos, loc);
 };
-function finishNodeAt(node2, type, pos, loc) {
-  node2.type = type;
-  node2.end = pos;
+function finishNodeAt(node, type, pos, loc) {
+  node.type = type;
+  node.end = pos;
   if (this.options.locations) {
-    node2.loc.end = loc;
+    node.loc.end = loc;
   }
   if (this.options.ranges) {
-    node2.range[1] = pos;
+    node.range[1] = pos;
   }
-  return node2;
+  return node;
 }
-pp$2.finishNode = function(node2, type) {
-  return finishNodeAt.call(this, node2, type, this.lastTokEnd, this.lastTokEndLoc);
+pp$2.finishNode = function(node, type) {
+  return finishNodeAt.call(this, node, type, this.lastTokEnd, this.lastTokEndLoc);
 };
-pp$2.finishNodeAt = function(node2, type, pos, loc) {
-  return finishNodeAt.call(this, node2, type, pos, loc);
+pp$2.finishNodeAt = function(node, type, pos, loc) {
+  return finishNodeAt.call(this, node, type, pos, loc);
 };
-pp$2.copyNode = function(node2) {
-  var newNode = new Node(this, node2.start, this.startLoc);
-  for (var prop in node2) {
-    newNode[prop] = node2[prop];
+pp$2.copyNode = function(node) {
+  var newNode = new Node(this, node.start, this.startLoc);
+  for (var prop in node) {
+    newNode[prop] = node[prop];
   }
   return newNode;
 };
@@ -7582,36 +5787,31 @@ function isNode(value) {
   return typeof value === "object" && value !== null && typeof value.type === "string" && typeof value.start === "number";
 }
 function parseSource(source2) {
-  for (const sourceType of ["script", "module"]) {
-    try {
-      return parse3(source2, {
-        ecmaVersion: "latest",
-        sourceType,
-        locations: true,
-        allowHashBang: true
-      });
-    } catch {
-      continue;
-    }
+  try {
+    return parseAs(source2, "script");
+  } catch {
+    return parseAs(source2, "module");
   }
-  return { type: "Program", start: 0, end: 0, body: [], loc: null };
+}
+function parseAs(source2, sourceType) {
+  return parse3(source2, { ecmaVersion: "latest", sourceType, locations: true, allowHashBang: true });
 }
 function walk(root, visit) {
   const stack = [root];
   while (stack.length > 0) {
-    const node2 = stack.pop();
-    if (node2 === void 0) {
+    const node = stack.pop();
+    if (node === void 0) {
       continue;
     }
-    visit(node2);
-    for (const child of children(node2)) {
+    visit(node);
+    for (const child of children(node)) {
       stack.push(child);
     }
   }
 }
-function children(node2) {
+function children(node) {
   const result = [];
-  for (const [key, value] of Object.entries(node2)) {
+  for (const [key, value] of Object.entries(node)) {
     if (skipKeys.has(key)) {
       continue;
     }
@@ -7629,38 +5829,42 @@ function children(node2) {
   }
   return result;
 }
-function line(node2) {
-  const value = node2.loc?.start.line;
+function line(node) {
+  const value = node.loc?.start.line;
   return value === void 0 ? 0 : value - 1;
 }
-function column(node2) {
-  return node2.loc?.start.column ?? 0;
+function column(node) {
+  return node.loc?.start.column ?? 0;
 }
-function identifier(node2) {
-  if (!isNode(node2) || node2.type !== "Identifier") {
+function nameSpan(node, name) {
+  const quoted = node.type === "Literal" || node.type === "TemplateLiteral";
+  return { line: line(node), column: column(node) + (quoted ? 1 : 0), length: name.length };
+}
+function identifier(node) {
+  if (!isNode(node) || node.type !== "Identifier") {
     return void 0;
   }
-  return typeof node2.name === "string" ? node2.name : void 0;
+  return typeof node.name === "string" ? node.name : void 0;
 }
-function stringValue(node2) {
-  if (!isNode(node2) || node2.type !== "Literal") {
+function stringValue(node) {
+  if (!isNode(node) || node.type !== "Literal") {
     return void 0;
   }
-  return typeof node2.value === "string" ? node2.value : void 0;
+  return typeof node.value === "string" ? node.value : void 0;
 }
-function staticStringValue(node2) {
-  const literal2 = stringValue(node2);
+function staticStringValue(node) {
+  const literal2 = stringValue(node);
   if (literal2 !== void 0) {
     return literal2;
   }
-  if (!isNode(node2) || node2.type !== "TemplateLiteral") {
+  if (!isNode(node) || node.type !== "TemplateLiteral") {
     return void 0;
   }
-  const expressions = node2.expressions;
+  const expressions = node.expressions;
   if (Array.isArray(expressions) && expressions.length > 0) {
     return void 0;
   }
-  const quasis = node2.quasis;
+  const quasis = node.quasis;
   if (!Array.isArray(quasis) || quasis.length !== 1) {
     return void 0;
   }
@@ -7668,23 +5872,23 @@ function staticStringValue(node2) {
   const cooked = isNode(quasi) ? quasi.value?.cooked : void 0;
   return typeof cooked === "string" ? cooked : void 0;
 }
-function numberValue(node2) {
-  if (!isNode(node2) || node2.type !== "Literal") {
+function numberValue(node) {
+  if (!isNode(node) || node.type !== "Literal") {
     return void 0;
   }
-  return typeof node2.value === "number" ? node2.value : void 0;
+  return typeof node.value === "number" ? node.value : void 0;
 }
-function properties(node2) {
-  if (node2 === void 0 || node2.type !== "ObjectExpression" || !Array.isArray(node2.properties)) {
+function properties(node) {
+  if (node === void 0 || node.type !== "ObjectExpression" || !Array.isArray(node.properties)) {
     return [];
   }
-  return node2.properties.filter(isNode).filter((property) => property.type === "Property");
+  return node.properties.filter(isNode).filter((property) => property.type === "Property");
 }
-function elements(node2) {
-  if (node2 === void 0 || node2.type !== "ArrayExpression" || !Array.isArray(node2.elements)) {
+function elements(node) {
+  if (node === void 0 || node.type !== "ArrayExpression" || !Array.isArray(node.elements)) {
     return [];
   }
-  return node2.elements.filter(isNode);
+  return node.elements.filter(isNode);
 }
 function propertyKey(property) {
   const key = property.key;
@@ -7694,14 +5898,14 @@ function propertyKey(property) {
 function propertyValue(property) {
   return isNode(property.value) ? property.value : void 0;
 }
-function memberName(node2) {
-  return identifier(node2.property) ?? stringValue(node2.property);
+function memberName(node) {
+  return identifier(node.property) ?? stringValue(node.property);
 }
-function objectProperty(node2, name) {
-  if (node2 === void 0) {
+function objectProperty(node, name) {
+  if (node === void 0) {
     return void 0;
   }
-  for (const property of properties(node2)) {
+  for (const property of properties(node)) {
     if (propertyKey(property) === name) {
       return propertyValue(property);
     }
@@ -7711,11 +5915,8 @@ function objectProperty(node2, name) {
 function firstArgument(call) {
   return Array.isArray(call.arguments) && isNode(call.arguments[0]) ? call.arguments[0] : void 0;
 }
-function firstStringArgument(call) {
-  return stringValue(firstArgument(call));
-}
 
-// src/parser/moleculerParser.ts
+// src/parser/schema.ts
 var reservedThisProps = /* @__PURE__ */ new Set([
   "broker",
   "logger",
@@ -7733,49 +5934,49 @@ var symbolBlocks = [
   ["methods", "method" /* Method */],
   ["channels", "channel" /* Channel */]
 ];
-var MoleculerParser = class {
-  parse(filePath, source2) {
-    const ast = parseSource(source2);
-    const service = findServiceObject(ast);
-    if (service === void 0) {
-      return this.parsePlainFile(filePath, ast);
+var hookPhases = ["before", "after", "error"];
+function isDeclarationKey(name) {
+  return name !== "handler";
+}
+function moleculerObject(ast) {
+  const exported = moduleExportsObject(ast);
+  if (exported === void 0) {
+    return void 0;
+  }
+  const shaped = serviceNamespace(exported) !== void 0 || symbolBlocks.some(([blockName]) => declarationKeys(objectProperty(exported, blockName)).length > 0) || mixinNames(exported).length > 0;
+  return shaped ? exported : void 0;
+}
+function serviceNamespace(service) {
+  const name = stringValue(objectProperty(service, "name"));
+  if (name === void 0 || name.length === 0) {
+    return void 0;
+  }
+  const version2 = numberValue(objectProperty(service, "version")) ?? 0;
+  return version2 > 0 ? `v${version2}.${name}` : name;
+}
+function declarationKeys(block) {
+  return properties(block).flatMap((property) => {
+    const name = propertyKey(property);
+    if (name === void 0 || !isDeclarationKey(name)) {
+      return [];
     }
-    const named = hasServiceName(service);
-    const namespace = serviceNamespace(filePath, service);
-    const symbols = extractSymbols(service, namespace);
-    if (!named && symbols.length === 0) {
-      return this.parsePlainFile(filePath, ast);
-    }
-    return {
-      symbols,
-      references: [...extractReferences(ast), ...extractHookReferences(service)],
-      mixins: extractMixins(service, filePath, requirePaths(ast)),
-      isService: named,
-      outline: extractOutline(service, named ? namespace : outlineName(filePath))
-    };
-  }
-  namespaceOf(filePath, source2) {
-    const service = findServiceObject(parseSource(source2));
-    return service === void 0 ? fallbackNamespace(filePath) : serviceNamespace(filePath, service);
-  }
-  parsePlainFile(filePath, ast) {
-    const namespace = fallbackNamespace(filePath);
-    return {
-      symbols: extractClassMethods(ast, namespace),
-      references: extractReferences(ast),
-      mixins: [],
-      isService: false
-    };
-  }
-};
-function findServiceObject(ast) {
+    return [{ name, key: isNode(property.key) ? property.key : property }];
+  });
+}
+function mixinNames(service) {
+  return elements(objectProperty(service, "mixins")).flatMap((node) => {
+    const name = identifier(node);
+    return name === void 0 ? [] : [{ name, node }];
+  });
+}
+function moduleExportsObject(ast) {
   let found;
-  walk(ast, (node2) => {
-    if (found !== void 0 || node2.type !== "AssignmentExpression") {
+  walk(ast, (node) => {
+    if (found !== void 0 || node.type !== "AssignmentExpression") {
       return;
     }
-    if (isModuleExports(node2.left) && isNode(node2.right) && node2.right.type === "ObjectExpression") {
-      found = node2.right;
+    if (isModuleExports(node.left) && isNode(node.right) && node.right.type === "ObjectExpression") {
+      found = node.right;
     }
   });
   return found;
@@ -7786,112 +5987,31 @@ function isModuleExports(value) {
   }
   return identifier(value.object) === "module" && memberName(value) === "exports";
 }
-function hasServiceName(service) {
-  const name = stringValue(objectProperty(service, "name"));
-  return name !== void 0 && name.length > 0;
-}
-function serviceNamespace(filePath, service) {
-  const name = stringValue(objectProperty(service, "name")) ?? "";
-  if (name.length === 0) {
-    return fallbackNamespace(filePath);
+
+// src/parser/moleculerParser.ts
+function parse4(source2) {
+  const ast = parseSource(source2);
+  const service = moleculerObject(ast);
+  if (service === void 0) {
+    return { namespace: void 0, declarations: classMethods(ast), references: callReferences(ast), mixins: [] };
   }
-  const version2 = numberValue(objectProperty(service, "version")) ?? 0;
-  return version2 > 0 ? `v${version2}.${name}` : name;
+  return {
+    namespace: serviceNamespace(service),
+    declarations: blockDeclarations(service),
+    references: [...callReferences(ast), ...hookReferences(service)],
+    mixins: mixinRequests(service, requirePaths(ast))
+  };
 }
-function fallbackNamespace(filePath) {
-  const base = filePath.split("/").pop() ?? "";
-  const stem = base.replace(/\.mixins?\.js$/, "").replace(/\.js$/, "");
-  let hash = 0;
-  for (let i2 = 0; i2 < filePath.length; i2 += 1) {
-    hash = (hash << 5) - hash + filePath.charCodeAt(i2) | 0;
-  }
-  return `#file_${stem}_${Math.abs(hash).toString(36)}`;
+function blockDeclarations(service) {
+  return symbolBlocks.flatMap(([blockName, kind]) => declarationKeys(objectProperty(service, blockName)).map(({ name, key }) => declaration(name, kind, key)));
 }
-function extractSymbols(service, namespace) {
-  return symbolBlocks.flatMap(([blockName, kind]) => {
-    const block = objectProperty(service, blockName);
-    return properties(block).flatMap((property) => {
-      const name = propertyKey(property);
-      if (name === void 0 || name === "handler") {
-        return [];
-      }
-      const key = isNode(property.key) ? property.key : property;
-      return [{
-        id: 0,
-        name,
-        fullName: `${namespace}.${name}`,
-        namespace,
-        kind,
-        fileId: 0,
-        sourceFileId: 0,
-        line: line(key),
-        column: column(key)
-      }];
-    });
-  });
-}
-function extractOutline(service, name) {
-  const groups = [];
-  const mixins = objectProperty(service, "mixins");
-  if (mixins !== void 0) {
-    groups.push(group("mixins", mixins, elements(mixins).flatMap((mixin) => {
-      const mixinName = identifier(mixin);
-      return mixinName === void 0 ? [] : [node(mixinName, "mixin", mixin)];
-    })));
-  }
-  for (const [blockName, kind] of symbolBlocks) {
-    const block = objectProperty(service, blockName);
-    if (block === void 0) {
-      continue;
-    }
-    groups.push(group(blockName, block, properties(block).flatMap((property) => {
-      const name2 = propertyKey(property);
-      if (name2 === void 0 || name2 === "handler") {
-        return [];
-      }
-      const key = isNode(property.key) ? property.key : property;
-      return [node(name2, outlineKind(kind), key)];
-    })));
-  }
-  const hooks = objectProperty(service, "hooks");
-  if (hooks !== void 0) {
-    groups.push(group("hooks", hooks, ["before", "after", "error"].flatMap((phase) => {
-      const phaseValue = objectProperty(hooks, phase);
-      if (phaseValue === void 0) {
-        return [];
-      }
-      return [group(phase, phaseValue, properties(phaseValue).flatMap((property) => {
-        const action = propertyKey(property);
-        const key = isNode(property.key) ? property.key : property;
-        return action === void 0 ? [] : [node(action, "hook", key)];
-      }), "hookPhase")];
-    })));
-  }
-  return { name, line: line(service), column: column(service), groups };
-}
-function group(name, source2, children2, kind = "group") {
-  return { name, kind, line: line(source2), column: column(source2), children: children2 };
-}
-function node(name, kind, source2) {
-  return { name, kind, line: line(source2), column: column(source2), children: [] };
-}
-function outlineKind(kind) {
-  if (kind === "action" /* Action */) return "action";
-  if (kind === "event" /* Event */) return "event";
-  if (kind === "channel" /* Channel */) return "channel";
-  return "method";
-}
-function outlineName(filePath) {
-  const base = filePath.split("/").pop() ?? filePath;
-  return base.replace(/\.js$/, "");
-}
-function extractClassMethods(ast, namespace) {
-  const symbols = [];
-  walk(ast, (node2) => {
-    if (node2.type !== "ClassDeclaration" && node2.type !== "ClassExpression") {
+function classMethods(ast) {
+  const declarations = [];
+  walk(ast, (node) => {
+    if (node.type !== "ClassDeclaration" && node.type !== "ClassExpression") {
       return;
     }
-    const body = node2.body;
+    const body = node.body;
     if (!isNode(body) || !Array.isArray(body.body)) {
       return;
     }
@@ -7900,151 +6020,101 @@ function extractClassMethods(ast, namespace) {
         continue;
       }
       const name = identifier(member.key);
-      if (name === void 0 || name === "constructor") {
-        continue;
+      if (name !== void 0 && name !== "constructor") {
+        declarations.push(declaration(name, "method" /* Method */, member.key));
       }
-      symbols.push({
-        id: 0,
-        name,
-        fullName: `${namespace}.${name}`,
-        namespace,
-        kind: "method" /* Method */,
-        fileId: 0,
-        sourceFileId: 0,
-        line: line(member.key),
-        column: column(member.key)
-      });
     }
   });
-  return symbols;
+  return declarations;
+}
+function declaration(name, kind, key) {
+  const { line: line2, column: column2 } = nameSpan(key, name);
+  return { name, kind, line: line2, column: column2 };
 }
 function requirePaths(ast) {
   const paths = /* @__PURE__ */ new Map();
-  walk(ast, (node2) => {
-    if (node2.type !== "VariableDeclarator") {
+  walk(ast, (node) => {
+    if (node.type !== "VariableDeclarator") {
       return;
     }
-    const name = identifier(node2.id);
-    const init = node2.init;
-    if (name === void 0 || !isNode(init) || init.type !== "CallExpression") {
+    const name = identifier(node.id);
+    const init = node.init;
+    if (name === void 0 || !isNode(init) || init.type !== "CallExpression" || identifier(init.callee) !== "require") {
       return;
     }
-    if (identifier(init.callee) !== "require") {
-      return;
-    }
-    const target = firstStringArgument(init);
+    const target = stringValue(firstArgument(init));
     if (target !== void 0) {
       paths.set(name, target);
     }
   });
   return paths;
 }
-function extractMixins(service, filePath, paths) {
-  return elements(objectProperty(service, "mixins")).flatMap((element) => {
-    const mixinName = identifier(element);
-    if (mixinName === void 0) {
-      return [];
-    }
-    return [{ mixinName, requirePath: paths.get(mixinName) ?? "", sourceFile: filePath }];
-  });
+function mixinRequests(service, paths) {
+  return mixinNames(service).map(({ name }) => ({ mixinName: name, requirePath: paths.get(name) ?? "" }));
 }
-function extractReferences(ast) {
+function callReferences(ast) {
   const references = [];
-  walk(ast, (node2) => {
-    if (node2.type !== "CallExpression" || !isNode(node2.callee) || node2.callee.type !== "MemberExpression") {
+  walk(ast, (node) => {
+    if (node.type !== "CallExpression" || !isNode(node.callee) || node.callee.type !== "MemberExpression") {
       return;
     }
-    const callee = node2.callee;
-    const method = memberName(callee);
-    if (method === void 0) {
-      return;
-    }
-    if (method === "call" || method === "emit" || method === "broadcast") {
-      const target = firstStringArgument(node2);
-      if (target !== void 0 && isBrokerLike(callee.object)) {
-        const arg = firstArgument(node2);
-        references.push({
-          fullName: target,
-          location: { fileId: 0, line: line(arg ?? node2), column: column(arg ?? node2) },
-          kind: referenceKind(method)
-        });
-      }
-      return;
-    }
-    if (method === "publish" || method === "sendToChannel") {
-      const arg = firstArgument(node2);
-      const target = staticStringValue(arg);
-      if (target !== void 0 && isPublishLike(callee.object, method)) {
-        references.push({
-          fullName: target,
-          location: { fileId: 0, line: line(arg ?? node2), column: column(arg ?? node2) },
-          kind: method === "sendToChannel" ? "channel" /* Channel */ : "emit" /* Emit */
-        });
-      }
-      return;
-    }
-    const selfName = selfCallName(callee, method);
-    if (selfName !== void 0) {
-      const anchor = isNode(callee.property) ? callee.property : callee;
-      references.push({
-        fullName: selfName,
-        location: { fileId: 0, line: line(anchor), column: column(anchor) },
-        kind: "call" /* Call */
-      });
+    const reference = callReference(node, node.callee);
+    if (reference !== void 0) {
+      references.push(reference);
     }
   });
   return references;
 }
-function isPublishLike(value, method) {
-  if (method === "publish") {
-    return isNode(value) && value.type === "ThisExpression";
+function callReference(call, callee) {
+  const method = memberName(callee);
+  if (method === void 0) {
+    return void 0;
   }
-  return isBrokerLike(value);
+  if (method === "call" || method === "emit" || method === "broadcast") {
+    const kind = method === "call" ? "action" /* Action */ : "event" /* Event */;
+    return isBrokerLike(callee.object) ? stringArgument(call, kind, stringValue) : void 0;
+  }
+  if (method === "publish") {
+    return isThis(callee.object) ? stringArgument(call, "event" /* Event */, staticStringValue) : void 0;
+  }
+  if (method === "sendToChannel") {
+    return isBrokerLike(callee.object) ? stringArgument(call, "channel" /* Channel */, staticStringValue) : void 0;
+  }
+  return selfCall(callee, method);
 }
-function selfCallName(callee, method) {
+function stringArgument(call, kind, read) {
+  const argument = firstArgument(call);
+  const target = read(argument);
+  return argument === void 0 || target === void 0 ? void 0 : { kind, target, span: nameSpan(argument, target) };
+}
+function selfCall(callee, method) {
   const object = callee.object;
   if (!isNode(object)) {
     return void 0;
   }
-  if (object.type === "ThisExpression") {
-    return reservedThisProps.has(method) ? void 0 : selfRef(method);
+  const holder = isThis(object) ? method : isThis(object.object) && object.type === "MemberExpression" ? memberName(object) : void 0;
+  if (holder === void 0 || reservedThisProps.has(holder)) {
+    return void 0;
   }
-  if (object.type === "MemberExpression" && isNode(object.object) && object.object.type === "ThisExpression") {
-    const holder = memberName(object);
-    return holder === void 0 || reservedThisProps.has(holder) ? void 0 : selfRef(method);
-  }
-  return void 0;
+  const anchor = isNode(callee.property) ? callee.property : callee;
+  return { kind: "self" /* Self */, target: method, span: nameSpan(anchor, method) };
 }
-function extractHookReferences(service) {
-  const references = [];
+function hookReferences(service) {
   const hooks = objectProperty(service, "hooks");
-  if (hooks === void 0) {
-    return references;
-  }
-  for (const phase of ["before", "after", "error"]) {
-    const phaseValue = objectProperty(hooks, phase);
-    if (phaseValue === void 0) {
-      continue;
-    }
-    for (const action of properties(phaseValue)) {
-      const value = propertyValue(action);
-      if (value === void 0) {
-        continue;
+  return hookPhases.flatMap((phase) => properties(objectProperty(hooks, phase)).flatMap((action) => {
+    const value = propertyValue(action);
+    const nodes = value === void 0 ? [] : value.type === "ArrayExpression" ? elements(value) : [value];
+    return nodes.flatMap((node) => {
+      const name = stringValue(node);
+      if (name === void 0 || name.length === 0 || name.includes(".")) {
+        return [];
       }
-      const nodes = value.type === "ArrayExpression" ? elements(value) : [value];
-      for (const node2 of nodes) {
-        const name = stringValue(node2);
-        if (name !== void 0 && name.length > 0 && !name.includes(".")) {
-          references.push({
-            fullName: selfRef(name),
-            location: { fileId: 0, line: line(node2), column: column(node2) },
-            kind: "call" /* Call */
-          });
-        }
-      }
-    }
-  }
-  return references;
+      return [{ kind: "self" /* Self */, target: name, span: nameSpan(node, name) }];
+    });
+  }));
+}
+function isThis(value) {
+  return isNode(value) && value.type === "ThisExpression";
 }
 function isBrokerLike(value) {
   if (!isNode(value)) {
@@ -8057,240 +6127,21 @@ function isBrokerLike(value) {
   if (value.type !== "MemberExpression" || memberName(value) !== "broker") {
     return false;
   }
-  const object = value.object;
-  return isNode(object) && (object.type === "ThisExpression" || identifier(object) === "ctx");
-}
-function referenceKind(method) {
-  if (method === "emit") {
-    return "emit" /* Emit */;
-  }
-  if (method === "broadcast") {
-    return "broadcast" /* Broadcast */;
-  }
-  return "call" /* Call */;
-}
-var SELF_PREFIX = "#self.";
-function selfRef(method) {
-  return `${SELF_PREFIX}${method}`;
-}
-function isSelfRef(fullName) {
-  return fullName.startsWith(SELF_PREFIX);
-}
-function selfMethod(fullName) {
-  return fullName.slice(SELF_PREFIX.length);
+  return isThis(value.object) || identifier(value.object) === "ctx";
 }
 
-// src/scanner/scanner.ts
+// src/scanner/files.ts
 import fs from "node:fs";
 import path from "node:path";
 var skipDirs = /* @__PURE__ */ new Set(["node_modules", ".git", ".vscode", "dist", "build", "coverage", ".next", "out"]);
-var Scanner = class {
-  constructor(index) {
-    this.index = index;
-  }
-  index;
-  parser = new MoleculerParser();
-  namespaces = /* @__PURE__ */ new Map();
-  serviceFiles = /* @__PURE__ */ new Set();
-  mixinSources = /* @__PURE__ */ new Map();
-  lastResult = { dropped: [], mixinFailures: [], fileCount: 0 };
-  scan(rootPath) {
-    this.index.clear();
-    this.namespaces.clear();
-    this.serviceFiles.clear();
-    this.mixinSources.clear();
-    const records = this.parseAll(collectFiles(rootPath));
-    const mixinFailures = this.resolveMixins(records);
-    const dropped = this.resolveReferences(records);
-    this.lastResult = { dropped, mixinFailures, fileCount: records.length };
-    return this.lastResult;
-  }
-  result() {
-    return this.lastResult;
-  }
-  namespaceOf(fileId) {
-    return this.namespaces.get(fileId) ?? "";
-  }
-  isServiceFile(fileId) {
-    return this.serviceFiles.has(fileId);
-  }
-  mixinSourcesOf(fileId) {
-    return this.mixinSources.get(fileId) ?? /* @__PURE__ */ new Set();
-  }
-  parseAll(files) {
-    const records = [];
-    for (const filePath of files) {
-      const source2 = readFile(filePath);
-      if (source2 === void 0) {
-        continue;
-      }
-      const fileId = this.index.fileId(filePath);
-      const parsed = this.parser.parse(filePath, source2);
-      const namespace = parsed.symbols[0]?.namespace ?? this.parser.namespaceOf(filePath, source2);
-      this.namespaces.set(fileId, namespace);
-      if (parsed.isService) {
-        this.serviceFiles.add(fileId);
-      }
-      for (const symbol of parsed.symbols) {
-        symbol.fileId = fileId;
-        symbol.sourceFileId = fileId;
-        this.index.insert(symbol);
-      }
-      for (const reference of parsed.references) {
-        reference.location.fileId = fileId;
-      }
-      records.push({
-        filePath,
-        fileId,
-        namespace,
-        isService: parsed.isService,
-        references: parsed.references,
-        mixins: parsed.mixins
-      });
-    }
-    return records;
-  }
-  resolveMixins(records) {
-    const failures = [];
-    const pending = [];
-    for (const record of records) {
-      for (const mixin of record.mixins) {
-        if (!isLocalRequire(mixin.requirePath)) {
-          continue;
-        }
-        const mixinPath = resolveRequire(mixin.sourceFile, mixin.requirePath);
-        if (mixinPath.length === 0) {
-          failures.push({ ...mixin, reason: "broken-require-path" /* BrokenRequirePath */ });
-          continue;
-        }
-        if (record.namespace.length === 0) {
-          failures.push({ ...mixin, reason: "namespace-empty" /* NamespaceEmpty */ });
-          continue;
-        }
-        const mixinFileId = this.index.fileId(mixinPath);
-        this.linkMixin(record.fileId, mixinFileId);
-        pending.push({ record, mixin, mixinFileId });
-      }
-    }
-    while (pending.length > 0) {
-      let inserted = 0;
-      for (const item of pending) {
-        inserted += this.copyMixinSymbols(item.record, item.mixinFileId);
-      }
-      if (inserted === 0) {
-        break;
-      }
-    }
-    return failures;
-  }
-  linkMixin(consumerFileId, mixinFileId) {
-    const existing = this.mixinSources.get(consumerFileId);
-    if (existing === void 0) {
-      this.mixinSources.set(consumerFileId, /* @__PURE__ */ new Set([mixinFileId]));
-      return;
-    }
-    existing.add(mixinFileId);
-  }
-  copyMixinSymbols(record, mixinFileId) {
-    let inserted = 0;
-    for (const symbol of this.index.symbolsByFile(mixinFileId)) {
-      const fullName = `${record.namespace}.${symbol.name}`;
-      if (this.index.has(fullName)) {
-        continue;
-      }
-      const copy = {
-        ...symbol,
-        id: 0,
-        fullName,
-        namespace: record.namespace,
-        fileId: record.fileId,
-        sourceFileId: symbol.sourceFileId
-      };
-      if (this.index.insert(copy)) {
-        inserted += 1;
-      }
-    }
-    return inserted;
-  }
-  resolveReferences(records) {
-    const dropped = [];
-    for (const record of records) {
-      for (const reference of record.references) {
-        const resolved = this.resolveOne(record, reference);
-        if (resolved.fullName !== void 0 && this.index.addReference(resolved.fullName, reference.location)) {
-          continue;
-        }
-        if (resolved.silent) {
-          continue;
-        }
-        dropped.push({
-          fullName: reference.fullName,
-          kind: reference.kind,
-          location: reference.location,
-          reason: resolved.reason ?? "genuinely-unresolved" /* GenuinelyUnresolved */
-        });
-      }
-    }
-    return dropped;
-  }
-  resolveOne(record, reference) {
-    if (isSelfRef(reference.fullName)) {
-      if (!record.isService) {
-        return { silent: true };
-      }
-      if (record.namespace.length === 0) {
-        return { reason: "namespace-empty" /* NamespaceEmpty */ };
-      }
-      return { fullName: `${record.namespace}.${selfMethod(reference.fullName)}` };
-    }
-    if (reference.kind === "emit" /* Emit */ || reference.kind === "broadcast" /* Broadcast */ || reference.kind === "channel" /* Channel */) {
-      return this.resolveEvent(record, reference);
-    }
-    if (this.index.has(reference.fullName)) {
-      return { fullName: reference.fullName };
-    }
-    return { reason: "genuinely-unresolved" /* GenuinelyUnresolved */ };
-  }
-  resolveEvent(record, reference) {
-    if (this.index.has(reference.fullName)) {
-      return { fullName: reference.fullName };
-    }
-    const targetKind = reference.kind === "channel" /* Channel */ ? "channel" /* Channel */ : "event" /* Event */;
-    const matches = this.index.allSymbols().filter(
-      (symbol) => symbol.kind === targetKind && symbol.name === reference.fullName
-    );
-    if (matches.length === 0) {
-      return { reason: "event-no-listener" /* EventNoListener */ };
-    }
-    const distinctOrigins = new Set(matches.map((symbol) => symbol.sourceFileId));
-    if (distinctOrigins.size === 1) {
-      return this.pickSameOriginMatch(record, matches);
-    }
-    const related = matches.filter((symbol) => this.isRelated(record.fileId, record.namespace, symbol));
-    const relatedOrigins = new Set(related.map((symbol) => symbol.sourceFileId));
-    if (relatedOrigins.size === 1) {
-      return this.pickSameOriginMatch(record, related);
-    }
-    return { reason: "name-collision" /* NameCollision */ };
-  }
-  pickSameOriginMatch(record, matches) {
-    const local = matches.find((symbol) => symbol.fileId === record.fileId);
-    return { fullName: (local ?? matches[0])?.fullName };
-  }
-  isRelated(callerFileId, callerNamespace, candidate) {
-    if (callerNamespace.length > 0 && candidate.namespace === callerNamespace) {
-      return true;
-    }
-    if (candidate.fileId === callerFileId || candidate.sourceFileId === callerFileId) {
-      return true;
-    }
-    const sources = this.mixinSources.get(callerFileId);
-    if (sources === void 0) {
-      return false;
-    }
-    return sources.has(candidate.sourceFileId) || sources.has(candidate.fileId);
-  }
-};
+var configFiles = ["moleculer.config.js", "moleculer.config.cjs", "moleculer.config.mjs", "moleculer.config.json", "moleculer.config.ts"];
+var dependencyFields = ["dependencies", "devDependencies", "peerDependencies"];
+function isSourceFile(filePath) {
+  return filePath.endsWith(".js");
+}
+function isSkippedPath(rootPath, filePath) {
+  return path.relative(rootPath, filePath).split(path.sep).some((part) => skipDirs.has(part));
+}
 function collectFiles(rootPath) {
   const results = [];
   const visit = (dir) => {
@@ -8302,13 +6153,9 @@ function collectFiles(rootPath) {
     }
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!skipDirs.has(entry.name)) {
-          visit(fullPath);
-        }
-        continue;
-      }
-      if (entry.isFile() && fullPath.endsWith(".js")) {
+      if (entry.isDirectory() && !skipDirs.has(entry.name)) {
+        visit(fullPath);
+      } else if (entry.isFile() && isSourceFile(fullPath)) {
         results.push(fullPath);
       }
     }
@@ -8316,44 +6163,13 @@ function collectFiles(rootPath) {
   visit(rootPath);
   return results;
 }
-function readFile(filePath) {
-  try {
-    return fs.readFileSync(filePath, "utf8");
-  } catch {
-    return void 0;
-  }
-}
-function isLocalRequire(requirePath) {
-  return requirePath.startsWith(".") || requirePath.startsWith("/");
-}
-function resolveRequire(sourceFile, requirePath) {
-  if (requirePath.length === 0 || !requirePath.startsWith(".")) {
-    return "";
-  }
-  const base = path.resolve(path.dirname(sourceFile), requirePath);
-  for (const candidate of [base, `${base}.js`, path.join(base, "index.js")]) {
-    if (candidate.endsWith(".js") && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-      return candidate;
-    }
-  }
-  return "";
-}
-
-// src/lsp/server.ts
-import { fileURLToPath as fileURLToPath3 } from "node:url";
-
-// src/scanner/workspace.ts
-import fs2 from "node:fs";
-import path2 from "node:path";
-var configFiles = ["moleculer.config.js", "moleculer.config.cjs", "moleculer.config.mjs", "moleculer.config.json", "moleculer.config.ts"];
-var dependencyFields = ["dependencies", "devDependencies", "peerDependencies"];
 function isMoleculerWorkspace(startPath) {
-  let dir = path2.resolve(startPath);
+  let dir = path.resolve(startPath);
   while (true) {
-    if (configFiles.some((name) => fs2.existsSync(path2.join(dir, name))) || dependsOnMoleculer(dir)) {
+    if (configFiles.some((name) => fs.existsSync(path.join(dir, name))) || dependsOnMoleculer(dir)) {
       return true;
     }
-    const parent = path2.dirname(dir);
+    const parent = path.dirname(dir);
     if (parent === dir) {
       return false;
     }
@@ -8363,7 +6179,7 @@ function isMoleculerWorkspace(startPath) {
 function dependsOnMoleculer(dir) {
   let manifest;
   try {
-    manifest = JSON.parse(fs2.readFileSync(path2.join(dir, "package.json"), "utf8"));
+    manifest = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
   } catch {
     return false;
   }
@@ -8377,54 +6193,2119 @@ function dependsOnMoleculer(dir) {
   });
 }
 
+// src/scanner/scanner.ts
+import fs2 from "node:fs";
+import path2 from "node:path";
+
+// src/log.ts
+function log(message) {
+  process.stderr.write(`[moleculer-lsp] ${message}
+`);
+}
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// src/scanner/resolution.ts
+var targetKinds = {
+  ["action" /* Action */]: "action" /* Action */,
+  ["event" /* Event */]: "event" /* Event */,
+  ["channel" /* Channel */]: "channel" /* Channel */
+};
+var selfKinds = ["method" /* Method */, "action" /* Action */, "event" /* Event */, "channel" /* Channel */];
+function qualify(namespace, name) {
+  return `${namespace}.${name}`;
+}
+var Resolution = class {
+  constructor(index) {
+    this.index = index;
+  }
+  index;
+  namespaces = /* @__PURE__ */ new Map();
+  mixinSources = /* @__PURE__ */ new Map();
+  consumers = /* @__PURE__ */ new Map();
+  hostCache = /* @__PURE__ */ new Map();
+  clear() {
+    this.namespaces.clear();
+    this.mixinSources.clear();
+    this.consumers.clear();
+    this.hostCache.clear();
+  }
+  setNamespace(fileId, namespace) {
+    this.namespaces.set(fileId, namespace);
+  }
+  linkMixin(consumerFileId, mixinFileId) {
+    addTo(this.mixinSources, consumerFileId, mixinFileId);
+    addTo(this.consumers, mixinFileId, consumerFileId);
+    this.hostCache.clear();
+  }
+  resolve(kind, target, callerFileId) {
+    if (kind === "self" /* Self */) {
+      return this.self(target, callerFileId);
+    }
+    const symbolKind = targetKinds[kind];
+    const exact = this.index.lookup(target, symbolKind);
+    if (exact !== void 0) {
+      return { symbol: exact };
+    }
+    if (symbolKind === "action" /* Action */) {
+      return { reason: "genuinely-unresolved" /* GenuinelyUnresolved */ };
+    }
+    return this.event(target, symbolKind, callerFileId);
+  }
+  resolveText(value, callerFileId) {
+    for (const kind of ["event" /* Event */, "channel" /* Channel */]) {
+      const listener = this.event(value, kind, callerFileId);
+      if ("symbol" in listener) {
+        return listener.symbol;
+      }
+    }
+    const resolved = this.resolve(value.includes(".") ? "action" /* Action */ : "self" /* Self */, value, callerFileId);
+    return "symbol" in resolved ? resolved.symbol : void 0;
+  }
+  serviceFile(namespace) {
+    for (const [fileId, fileNamespace] of this.namespaces) {
+      if (fileNamespace === namespace) {
+        return fileId;
+      }
+    }
+    return void 0;
+  }
+  references(symbol) {
+    return this.index.named(symbol.name).filter((candidate) => candidate.kind === symbol.kind && candidate.sourceFileId === symbol.sourceFileId).flatMap((candidate) => this.index.referencesTo(candidate));
+  }
+  self(name, callerFileId) {
+    const namespace = this.namespaces.get(callerFileId);
+    const symbol = this.ownByName(namespace, name);
+    return symbol === void 0 ? this.relatedByName(name, callerFileId) : { symbol };
+  }
+  ownByName(namespace, name) {
+    if (namespace === void 0) {
+      return void 0;
+    }
+    const fullName = qualify(namespace, name);
+    return selfKinds.map((kind) => this.index.lookup(fullName, kind)).find((symbol) => symbol !== void 0);
+  }
+  relatedByName(name, callerFileId) {
+    const related = this.index.named(name).filter((symbol) => this.isRelated(callerFileId, symbol));
+    for (const kind of selfKinds) {
+      const ofKind = related.filter((symbol) => symbol.kind === kind);
+      if (ofKind.length === 0) {
+        continue;
+      }
+      if (!hasSingleOrigin(ofKind)) {
+        return { reason: "name-collision" /* NameCollision */ };
+      }
+      return { symbol: ofKind.find((candidate) => candidate.fileId === candidate.sourceFileId) ?? ofKind[0] };
+    }
+    return { reason: "genuinely-unresolved" /* GenuinelyUnresolved */ };
+  }
+  event(name, kind, callerFileId) {
+    const matches = this.index.named(name).filter((symbol) => symbol.kind === kind);
+    if (matches.length === 0) {
+      return { reason: "event-no-listener" /* EventNoListener */ };
+    }
+    const candidates = hasSingleOrigin(matches) ? matches : matches.filter((symbol) => this.isRelated(callerFileId, symbol));
+    if (!hasSingleOrigin(candidates)) {
+      return { reason: "name-collision" /* NameCollision */ };
+    }
+    return { symbol: candidates.find((symbol) => symbol.fileId === callerFileId) ?? candidates[0] };
+  }
+  isRelated(callerFileId, candidate) {
+    if (candidate.namespace === this.namespaces.get(callerFileId)) {
+      return true;
+    }
+    if (candidate.fileId === callerFileId || candidate.sourceFileId === callerFileId) {
+      return true;
+    }
+    if (this.hostNamespaces(callerFileId).has(candidate.namespace)) {
+      return true;
+    }
+    const sources = this.mixinSources.get(callerFileId);
+    return sources !== void 0 && (sources.has(candidate.sourceFileId) || sources.has(candidate.fileId));
+  }
+  hostNamespaces(mixinFileId) {
+    const cached = this.hostCache.get(mixinFileId);
+    if (cached !== void 0) {
+      return cached;
+    }
+    const hosts = /* @__PURE__ */ new Set();
+    const visited = /* @__PURE__ */ new Set([mixinFileId]);
+    const queue = [...this.consumers.get(mixinFileId) ?? []];
+    while (queue.length > 0) {
+      const fileId = queue.pop();
+      if (visited.has(fileId)) {
+        continue;
+      }
+      visited.add(fileId);
+      const namespace = this.namespaces.get(fileId);
+      if (namespace !== void 0) {
+        hosts.add(namespace);
+      }
+      queue.push(...this.consumers.get(fileId) ?? []);
+    }
+    this.hostCache.set(mixinFileId, hosts);
+    return hosts;
+  }
+};
+function hasSingleOrigin(symbols) {
+  return symbols.length > 0 && new Set(symbols.map((symbol) => symbol.sourceFileId)).size === 1;
+}
+function addTo(map, key, value) {
+  const existing = map.get(key);
+  if (existing === void 0) {
+    map.set(key, /* @__PURE__ */ new Set([value]));
+    return;
+  }
+  existing.add(value);
+}
+
+// src/scanner/scanner.ts
+var Scanner = class {
+  constructor(index) {
+    this.index = index;
+    this.resolution = new Resolution(index);
+  }
+  index;
+  resolution;
+  scan(files) {
+    this.index.clear();
+    this.resolution.clear();
+    const records = this.parseAll(files);
+    const mixinFailures = this.resolveMixins(records);
+    const dropped = this.resolveReferences(records);
+    return { dropped, mixinFailures, fileCount: records.length };
+  }
+  parseAll(files) {
+    const records = [];
+    for (const filePath of files) {
+      const parsed = parseFile(filePath);
+      if (parsed === void 0) {
+        continue;
+      }
+      const fileId = this.index.fileId(filePath);
+      const { declarations, references, mixins } = parsed;
+      const namespace = parsed.namespace ?? `#file_${fileId}`;
+      const isService = parsed.namespace !== void 0;
+      this.resolution.setNamespace(fileId, namespace);
+      for (const declaration2 of declarations) {
+        this.index.insert({ ...declaration2, fullName: qualify(namespace, declaration2.name), namespace, fileId, sourceFileId: fileId });
+      }
+      records.push({ filePath, fileId, namespace, isService, references, mixins });
+    }
+    return records;
+  }
+  resolveMixins(records) {
+    const failures = [];
+    const pending = [];
+    for (const record of records) {
+      for (const mixin of record.mixins) {
+        if (!isLocalRequire(mixin.requirePath)) {
+          continue;
+        }
+        const mixinPath = resolveRequire(record.filePath, mixin.requirePath);
+        if (mixinPath === void 0) {
+          failures.push({ ...mixin, filePath: record.filePath });
+          continue;
+        }
+        const mixinFileId = this.index.fileId(mixinPath);
+        this.resolution.linkMixin(record.fileId, mixinFileId);
+        pending.push({ record, mixinFileId });
+      }
+    }
+    let inserted = pending.length;
+    while (inserted > 0) {
+      inserted = 0;
+      for (const item of pending) {
+        inserted += this.copyMixinSymbols(item.record, item.mixinFileId);
+      }
+    }
+    return failures;
+  }
+  copyMixinSymbols(record, mixinFileId) {
+    let inserted = 0;
+    for (const symbol of this.index.symbolsByFile(mixinFileId)) {
+      const copy = { ...symbol, fullName: qualify(record.namespace, symbol.name), namespace: record.namespace, fileId: record.fileId };
+      if (this.index.insert(copy)) {
+        inserted += 1;
+      }
+    }
+    return inserted;
+  }
+  resolveReferences(records) {
+    const dropped = [];
+    for (const record of records) {
+      for (const { kind, target, span } of record.references) {
+        const location = { ...span, fileId: record.fileId };
+        const resolved = this.resolution.resolve(kind, target, record.fileId);
+        if ("symbol" in resolved) {
+          this.index.addReference(resolved.symbol, location);
+        } else if (kind !== "self" /* Self */ || record.isService) {
+          dropped.push({ kind, target, location, reason: resolved.reason });
+        }
+      }
+    }
+    return dropped;
+  }
+};
+function parseFile(filePath) {
+  try {
+    return parse4(fs2.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    log(`skipped ${filePath}: ${errorMessage(error)}`);
+    return void 0;
+  }
+}
+function isLocalRequire(requirePath) {
+  return requirePath.startsWith(".") || path2.isAbsolute(requirePath);
+}
+function resolveRequire(sourceFile, requirePath) {
+  const base = path2.resolve(path2.dirname(sourceFile), requirePath);
+  return [base, `${base}.js`, path2.join(base, "index.js")].find((candidate) => candidate.endsWith(".js") && fs2.existsSync(candidate) && fs2.statSync(candidate).isFile());
+}
+
+// node_modules/chokidar/esm/index.js
+import { stat as statcb } from "fs";
+import { stat as stat3, readdir as readdir2 } from "fs/promises";
+import { EventEmitter } from "events";
+import * as sysPath2 from "path";
+
+// node_modules/readdirp/esm/index.js
+import { stat, lstat, readdir, realpath } from "node:fs/promises";
+import { Readable } from "node:stream";
+import { resolve as presolve, relative as prelative, join as pjoin, sep as psep } from "node:path";
+var EntryTypes = {
+  FILE_TYPE: "files",
+  DIR_TYPE: "directories",
+  FILE_DIR_TYPE: "files_directories",
+  EVERYTHING_TYPE: "all"
+};
+var defaultOptions2 = {
+  root: ".",
+  fileFilter: (_entryInfo) => true,
+  directoryFilter: (_entryInfo) => true,
+  type: EntryTypes.FILE_TYPE,
+  lstat: false,
+  depth: 2147483648,
+  alwaysStat: false,
+  highWaterMark: 4096
+};
+Object.freeze(defaultOptions2);
+var RECURSIVE_ERROR_CODE = "READDIRP_RECURSIVE_ERROR";
+var NORMAL_FLOW_ERRORS = /* @__PURE__ */ new Set(["ENOENT", "EPERM", "EACCES", "ELOOP", RECURSIVE_ERROR_CODE]);
+var ALL_TYPES = [
+  EntryTypes.DIR_TYPE,
+  EntryTypes.EVERYTHING_TYPE,
+  EntryTypes.FILE_DIR_TYPE,
+  EntryTypes.FILE_TYPE
+];
+var DIR_TYPES = /* @__PURE__ */ new Set([
+  EntryTypes.DIR_TYPE,
+  EntryTypes.EVERYTHING_TYPE,
+  EntryTypes.FILE_DIR_TYPE
+]);
+var FILE_TYPES = /* @__PURE__ */ new Set([
+  EntryTypes.EVERYTHING_TYPE,
+  EntryTypes.FILE_DIR_TYPE,
+  EntryTypes.FILE_TYPE
+]);
+var isNormalFlowError = (error) => NORMAL_FLOW_ERRORS.has(error.code);
+var wantBigintFsStats = process.platform === "win32";
+var emptyFn = (_entryInfo) => true;
+var normalizeFilter = (filter) => {
+  if (filter === void 0)
+    return emptyFn;
+  if (typeof filter === "function")
+    return filter;
+  if (typeof filter === "string") {
+    const fl = filter.trim();
+    return (entry) => entry.basename === fl;
+  }
+  if (Array.isArray(filter)) {
+    const trItems = filter.map((item) => item.trim());
+    return (entry) => trItems.some((f) => entry.basename === f);
+  }
+  return emptyFn;
+};
+var ReaddirpStream = class extends Readable {
+  constructor(options = {}) {
+    super({
+      objectMode: true,
+      autoDestroy: true,
+      highWaterMark: options.highWaterMark
+    });
+    const opts = { ...defaultOptions2, ...options };
+    const { root, type } = opts;
+    this._fileFilter = normalizeFilter(opts.fileFilter);
+    this._directoryFilter = normalizeFilter(opts.directoryFilter);
+    const statMethod = opts.lstat ? lstat : stat;
+    if (wantBigintFsStats) {
+      this._stat = (path6) => statMethod(path6, { bigint: true });
+    } else {
+      this._stat = statMethod;
+    }
+    this._maxDepth = opts.depth ?? defaultOptions2.depth;
+    this._wantsDir = type ? DIR_TYPES.has(type) : false;
+    this._wantsFile = type ? FILE_TYPES.has(type) : false;
+    this._wantsEverything = type === EntryTypes.EVERYTHING_TYPE;
+    this._root = presolve(root);
+    this._isDirent = !opts.alwaysStat;
+    this._statsProp = this._isDirent ? "dirent" : "stats";
+    this._rdOptions = { encoding: "utf8", withFileTypes: this._isDirent };
+    this.parents = [this._exploreDir(root, 1)];
+    this.reading = false;
+    this.parent = void 0;
+  }
+  async _read(batch) {
+    if (this.reading)
+      return;
+    this.reading = true;
+    try {
+      while (!this.destroyed && batch > 0) {
+        const par = this.parent;
+        const fil = par && par.files;
+        if (fil && fil.length > 0) {
+          const { path: path6, depth } = par;
+          const slice = fil.splice(0, batch).map((dirent) => this._formatEntry(dirent, path6));
+          const awaited = await Promise.all(slice);
+          for (const entry of awaited) {
+            if (!entry)
+              continue;
+            if (this.destroyed)
+              return;
+            const entryType = await this._getEntryType(entry);
+            if (entryType === "directory" && this._directoryFilter(entry)) {
+              if (depth <= this._maxDepth) {
+                this.parents.push(this._exploreDir(entry.fullPath, depth + 1));
+              }
+              if (this._wantsDir) {
+                this.push(entry);
+                batch--;
+              }
+            } else if ((entryType === "file" || this._includeAsFile(entry)) && this._fileFilter(entry)) {
+              if (this._wantsFile) {
+                this.push(entry);
+                batch--;
+              }
+            }
+          }
+        } else {
+          const parent = this.parents.pop();
+          if (!parent) {
+            this.push(null);
+            break;
+          }
+          this.parent = await parent;
+          if (this.destroyed)
+            return;
+        }
+      }
+    } catch (error) {
+      this.destroy(error);
+    } finally {
+      this.reading = false;
+    }
+  }
+  async _exploreDir(path6, depth) {
+    let files;
+    try {
+      files = await readdir(path6, this._rdOptions);
+    } catch (error) {
+      this._onError(error);
+    }
+    return { files, depth, path: path6 };
+  }
+  async _formatEntry(dirent, path6) {
+    let entry;
+    const basename3 = this._isDirent ? dirent.name : dirent;
+    try {
+      const fullPath = presolve(pjoin(path6, basename3));
+      entry = { path: prelative(this._root, fullPath), fullPath, basename: basename3 };
+      entry[this._statsProp] = this._isDirent ? dirent : await this._stat(fullPath);
+    } catch (err) {
+      this._onError(err);
+      return;
+    }
+    return entry;
+  }
+  _onError(err) {
+    if (isNormalFlowError(err) && !this.destroyed) {
+      this.emit("warn", err);
+    } else {
+      this.destroy(err);
+    }
+  }
+  async _getEntryType(entry) {
+    if (!entry && this._statsProp in entry) {
+      return "";
+    }
+    const stats = entry[this._statsProp];
+    if (stats.isFile())
+      return "file";
+    if (stats.isDirectory())
+      return "directory";
+    if (stats && stats.isSymbolicLink()) {
+      const full = entry.fullPath;
+      try {
+        const entryRealPath = await realpath(full);
+        const entryRealPathStats = await lstat(entryRealPath);
+        if (entryRealPathStats.isFile()) {
+          return "file";
+        }
+        if (entryRealPathStats.isDirectory()) {
+          const len = entryRealPath.length;
+          if (full.startsWith(entryRealPath) && full.substr(len, 1) === psep) {
+            const recursiveError = new Error(`Circular symlink detected: "${full}" points to "${entryRealPath}"`);
+            recursiveError.code = RECURSIVE_ERROR_CODE;
+            return this._onError(recursiveError);
+          }
+          return "directory";
+        }
+      } catch (error) {
+        this._onError(error);
+        return "";
+      }
+    }
+  }
+  _includeAsFile(entry) {
+    const stats = entry && entry[this._statsProp];
+    return stats && this._wantsEverything && !stats.isDirectory();
+  }
+};
+function readdirp(root, options = {}) {
+  let type = options.entryType || options.type;
+  if (type === "both")
+    type = EntryTypes.FILE_DIR_TYPE;
+  if (type)
+    options.type = type;
+  if (!root) {
+    throw new Error("readdirp: root argument is required. Usage: readdirp(root, options)");
+  } else if (typeof root !== "string") {
+    throw new TypeError("readdirp: root argument must be a string. Usage: readdirp(root, options)");
+  } else if (type && !ALL_TYPES.includes(type)) {
+    throw new Error(`readdirp: Invalid type passed. Use one of ${ALL_TYPES.join(", ")}`);
+  }
+  options.root = root;
+  return new ReaddirpStream(options);
+}
+
+// node_modules/chokidar/esm/handler.js
+import { watchFile, unwatchFile, watch as fs_watch } from "fs";
+import { open, stat as stat2, lstat as lstat2, realpath as fsrealpath } from "fs/promises";
+import * as sysPath from "path";
+import { type as osType } from "os";
+var STR_DATA = "data";
+var STR_END = "end";
+var STR_CLOSE = "close";
+var EMPTY_FN = () => {
+};
+var pl = process.platform;
+var isWindows = pl === "win32";
+var isMacos = pl === "darwin";
+var isLinux = pl === "linux";
+var isFreeBSD = pl === "freebsd";
+var isIBMi = osType() === "OS400";
+var EVENTS = {
+  ALL: "all",
+  READY: "ready",
+  ADD: "add",
+  CHANGE: "change",
+  ADD_DIR: "addDir",
+  UNLINK: "unlink",
+  UNLINK_DIR: "unlinkDir",
+  RAW: "raw",
+  ERROR: "error"
+};
+var EV = EVENTS;
+var THROTTLE_MODE_WATCH = "watch";
+var statMethods = { lstat: lstat2, stat: stat2 };
+var KEY_LISTENERS = "listeners";
+var KEY_ERR = "errHandlers";
+var KEY_RAW = "rawEmitters";
+var HANDLER_KEYS = [KEY_LISTENERS, KEY_ERR, KEY_RAW];
+var binaryExtensions = /* @__PURE__ */ new Set([
+  "3dm",
+  "3ds",
+  "3g2",
+  "3gp",
+  "7z",
+  "a",
+  "aac",
+  "adp",
+  "afdesign",
+  "afphoto",
+  "afpub",
+  "ai",
+  "aif",
+  "aiff",
+  "alz",
+  "ape",
+  "apk",
+  "appimage",
+  "ar",
+  "arj",
+  "asf",
+  "au",
+  "avi",
+  "bak",
+  "baml",
+  "bh",
+  "bin",
+  "bk",
+  "bmp",
+  "btif",
+  "bz2",
+  "bzip2",
+  "cab",
+  "caf",
+  "cgm",
+  "class",
+  "cmx",
+  "cpio",
+  "cr2",
+  "cur",
+  "dat",
+  "dcm",
+  "deb",
+  "dex",
+  "djvu",
+  "dll",
+  "dmg",
+  "dng",
+  "doc",
+  "docm",
+  "docx",
+  "dot",
+  "dotm",
+  "dra",
+  "DS_Store",
+  "dsk",
+  "dts",
+  "dtshd",
+  "dvb",
+  "dwg",
+  "dxf",
+  "ecelp4800",
+  "ecelp7470",
+  "ecelp9600",
+  "egg",
+  "eol",
+  "eot",
+  "epub",
+  "exe",
+  "f4v",
+  "fbs",
+  "fh",
+  "fla",
+  "flac",
+  "flatpak",
+  "fli",
+  "flv",
+  "fpx",
+  "fst",
+  "fvt",
+  "g3",
+  "gh",
+  "gif",
+  "graffle",
+  "gz",
+  "gzip",
+  "h261",
+  "h263",
+  "h264",
+  "icns",
+  "ico",
+  "ief",
+  "img",
+  "ipa",
+  "iso",
+  "jar",
+  "jpeg",
+  "jpg",
+  "jpgv",
+  "jpm",
+  "jxr",
+  "key",
+  "ktx",
+  "lha",
+  "lib",
+  "lvp",
+  "lz",
+  "lzh",
+  "lzma",
+  "lzo",
+  "m3u",
+  "m4a",
+  "m4v",
+  "mar",
+  "mdi",
+  "mht",
+  "mid",
+  "midi",
+  "mj2",
+  "mka",
+  "mkv",
+  "mmr",
+  "mng",
+  "mobi",
+  "mov",
+  "movie",
+  "mp3",
+  "mp4",
+  "mp4a",
+  "mpeg",
+  "mpg",
+  "mpga",
+  "mxu",
+  "nef",
+  "npx",
+  "numbers",
+  "nupkg",
+  "o",
+  "odp",
+  "ods",
+  "odt",
+  "oga",
+  "ogg",
+  "ogv",
+  "otf",
+  "ott",
+  "pages",
+  "pbm",
+  "pcx",
+  "pdb",
+  "pdf",
+  "pea",
+  "pgm",
+  "pic",
+  "png",
+  "pnm",
+  "pot",
+  "potm",
+  "potx",
+  "ppa",
+  "ppam",
+  "ppm",
+  "pps",
+  "ppsm",
+  "ppsx",
+  "ppt",
+  "pptm",
+  "pptx",
+  "psd",
+  "pya",
+  "pyc",
+  "pyo",
+  "pyv",
+  "qt",
+  "rar",
+  "ras",
+  "raw",
+  "resources",
+  "rgb",
+  "rip",
+  "rlc",
+  "rmf",
+  "rmvb",
+  "rpm",
+  "rtf",
+  "rz",
+  "s3m",
+  "s7z",
+  "scpt",
+  "sgi",
+  "shar",
+  "snap",
+  "sil",
+  "sketch",
+  "slk",
+  "smv",
+  "snk",
+  "so",
+  "stl",
+  "suo",
+  "sub",
+  "swf",
+  "tar",
+  "tbz",
+  "tbz2",
+  "tga",
+  "tgz",
+  "thmx",
+  "tif",
+  "tiff",
+  "tlz",
+  "ttc",
+  "ttf",
+  "txz",
+  "udf",
+  "uvh",
+  "uvi",
+  "uvm",
+  "uvp",
+  "uvs",
+  "uvu",
+  "viv",
+  "vob",
+  "war",
+  "wav",
+  "wax",
+  "wbmp",
+  "wdp",
+  "weba",
+  "webm",
+  "webp",
+  "whl",
+  "wim",
+  "wm",
+  "wma",
+  "wmv",
+  "wmx",
+  "woff",
+  "woff2",
+  "wrm",
+  "wvx",
+  "xbm",
+  "xif",
+  "xla",
+  "xlam",
+  "xls",
+  "xlsb",
+  "xlsm",
+  "xlsx",
+  "xlt",
+  "xltm",
+  "xltx",
+  "xm",
+  "xmind",
+  "xpi",
+  "xpm",
+  "xwd",
+  "xz",
+  "z",
+  "zip",
+  "zipx"
+]);
+var isBinaryPath = (filePath) => binaryExtensions.has(sysPath.extname(filePath).slice(1).toLowerCase());
+var foreach = (val, fn) => {
+  if (val instanceof Set) {
+    val.forEach(fn);
+  } else {
+    fn(val);
+  }
+};
+var addAndConvert = (main2, prop, item) => {
+  let container = main2[prop];
+  if (!(container instanceof Set)) {
+    main2[prop] = container = /* @__PURE__ */ new Set([container]);
+  }
+  container.add(item);
+};
+var clearItem = (cont) => (key) => {
+  const set = cont[key];
+  if (set instanceof Set) {
+    set.clear();
+  } else {
+    delete cont[key];
+  }
+};
+var delFromSet = (main2, prop, item) => {
+  const container = main2[prop];
+  if (container instanceof Set) {
+    container.delete(item);
+  } else if (container === item) {
+    delete main2[prop];
+  }
+};
+var isEmptySet = (val) => val instanceof Set ? val.size === 0 : !val;
+var FsWatchInstances = /* @__PURE__ */ new Map();
+function createFsWatchInstance(path6, options, listener, errHandler, emitRaw) {
+  const handleEvent = (rawEvent, evPath) => {
+    listener(path6);
+    emitRaw(rawEvent, evPath, { watchedPath: path6 });
+    if (evPath && path6 !== evPath) {
+      fsWatchBroadcast(sysPath.resolve(path6, evPath), KEY_LISTENERS, sysPath.join(path6, evPath));
+    }
+  };
+  try {
+    return fs_watch(path6, {
+      persistent: options.persistent
+    }, handleEvent);
+  } catch (error) {
+    errHandler(error);
+    return void 0;
+  }
+}
+var fsWatchBroadcast = (fullPath, listenerType, val1, val2, val3) => {
+  const cont = FsWatchInstances.get(fullPath);
+  if (!cont)
+    return;
+  foreach(cont[listenerType], (listener) => {
+    listener(val1, val2, val3);
+  });
+};
+var setFsWatchListener = (path6, fullPath, options, handlers) => {
+  const { listener, errHandler, rawEmitter } = handlers;
+  let cont = FsWatchInstances.get(fullPath);
+  let watcher;
+  if (!options.persistent) {
+    watcher = createFsWatchInstance(path6, options, listener, errHandler, rawEmitter);
+    if (!watcher)
+      return;
+    return watcher.close.bind(watcher);
+  }
+  if (cont) {
+    addAndConvert(cont, KEY_LISTENERS, listener);
+    addAndConvert(cont, KEY_ERR, errHandler);
+    addAndConvert(cont, KEY_RAW, rawEmitter);
+  } else {
+    watcher = createFsWatchInstance(
+      path6,
+      options,
+      fsWatchBroadcast.bind(null, fullPath, KEY_LISTENERS),
+      errHandler,
+      // no need to use broadcast here
+      fsWatchBroadcast.bind(null, fullPath, KEY_RAW)
+    );
+    if (!watcher)
+      return;
+    watcher.on(EV.ERROR, async (error) => {
+      const broadcastErr = fsWatchBroadcast.bind(null, fullPath, KEY_ERR);
+      if (cont)
+        cont.watcherUnusable = true;
+      if (isWindows && error.code === "EPERM") {
+        try {
+          const fd = await open(path6, "r");
+          await fd.close();
+          broadcastErr(error);
+        } catch (err) {
+        }
+      } else {
+        broadcastErr(error);
+      }
+    });
+    cont = {
+      listeners: listener,
+      errHandlers: errHandler,
+      rawEmitters: rawEmitter,
+      watcher
+    };
+    FsWatchInstances.set(fullPath, cont);
+  }
+  return () => {
+    delFromSet(cont, KEY_LISTENERS, listener);
+    delFromSet(cont, KEY_ERR, errHandler);
+    delFromSet(cont, KEY_RAW, rawEmitter);
+    if (isEmptySet(cont.listeners)) {
+      cont.watcher.close();
+      FsWatchInstances.delete(fullPath);
+      HANDLER_KEYS.forEach(clearItem(cont));
+      cont.watcher = void 0;
+      Object.freeze(cont);
+    }
+  };
+};
+var FsWatchFileInstances = /* @__PURE__ */ new Map();
+var setFsWatchFileListener = (path6, fullPath, options, handlers) => {
+  const { listener, rawEmitter } = handlers;
+  let cont = FsWatchFileInstances.get(fullPath);
+  const copts = cont && cont.options;
+  if (copts && (copts.persistent < options.persistent || copts.interval > options.interval)) {
+    unwatchFile(fullPath);
+    cont = void 0;
+  }
+  if (cont) {
+    addAndConvert(cont, KEY_LISTENERS, listener);
+    addAndConvert(cont, KEY_RAW, rawEmitter);
+  } else {
+    cont = {
+      listeners: listener,
+      rawEmitters: rawEmitter,
+      options,
+      watcher: watchFile(fullPath, options, (curr, prev) => {
+        foreach(cont.rawEmitters, (rawEmitter2) => {
+          rawEmitter2(EV.CHANGE, fullPath, { curr, prev });
+        });
+        const currmtime = curr.mtimeMs;
+        if (curr.size !== prev.size || currmtime > prev.mtimeMs || currmtime === 0) {
+          foreach(cont.listeners, (listener2) => listener2(path6, curr));
+        }
+      })
+    };
+    FsWatchFileInstances.set(fullPath, cont);
+  }
+  return () => {
+    delFromSet(cont, KEY_LISTENERS, listener);
+    delFromSet(cont, KEY_RAW, rawEmitter);
+    if (isEmptySet(cont.listeners)) {
+      FsWatchFileInstances.delete(fullPath);
+      unwatchFile(fullPath);
+      cont.options = cont.watcher = void 0;
+      Object.freeze(cont);
+    }
+  };
+};
+var NodeFsHandler = class {
+  constructor(fsW) {
+    this.fsw = fsW;
+    this._boundHandleError = (error) => fsW._handleError(error);
+  }
+  /**
+   * Watch file for changes with fs_watchFile or fs_watch.
+   * @param path to file or dir
+   * @param listener on fs change
+   * @returns closer for the watcher instance
+   */
+  _watchWithNodeFs(path6, listener) {
+    const opts = this.fsw.options;
+    const directory = sysPath.dirname(path6);
+    const basename3 = sysPath.basename(path6);
+    const parent = this.fsw._getWatchedDir(directory);
+    parent.add(basename3);
+    const absolutePath = sysPath.resolve(path6);
+    const options = {
+      persistent: opts.persistent
+    };
+    if (!listener)
+      listener = EMPTY_FN;
+    let closer;
+    if (opts.usePolling) {
+      const enableBin = opts.interval !== opts.binaryInterval;
+      options.interval = enableBin && isBinaryPath(basename3) ? opts.binaryInterval : opts.interval;
+      closer = setFsWatchFileListener(path6, absolutePath, options, {
+        listener,
+        rawEmitter: this.fsw._emitRaw
+      });
+    } else {
+      closer = setFsWatchListener(path6, absolutePath, options, {
+        listener,
+        errHandler: this._boundHandleError,
+        rawEmitter: this.fsw._emitRaw
+      });
+    }
+    return closer;
+  }
+  /**
+   * Watch a file and emit add event if warranted.
+   * @returns closer for the watcher instance
+   */
+  _handleFile(file, stats, initialAdd) {
+    if (this.fsw.closed) {
+      return;
+    }
+    const dirname3 = sysPath.dirname(file);
+    const basename3 = sysPath.basename(file);
+    const parent = this.fsw._getWatchedDir(dirname3);
+    let prevStats = stats;
+    if (parent.has(basename3))
+      return;
+    const listener = async (path6, newStats) => {
+      if (!this.fsw._throttle(THROTTLE_MODE_WATCH, file, 5))
+        return;
+      if (!newStats || newStats.mtimeMs === 0) {
+        try {
+          const newStats2 = await stat2(file);
+          if (this.fsw.closed)
+            return;
+          const at2 = newStats2.atimeMs;
+          const mt = newStats2.mtimeMs;
+          if (!at2 || at2 <= mt || mt !== prevStats.mtimeMs) {
+            this.fsw._emit(EV.CHANGE, file, newStats2);
+          }
+          if ((isMacos || isLinux || isFreeBSD) && prevStats.ino !== newStats2.ino) {
+            this.fsw._closeFile(path6);
+            prevStats = newStats2;
+            const closer2 = this._watchWithNodeFs(file, listener);
+            if (closer2)
+              this.fsw._addPathCloser(path6, closer2);
+          } else {
+            prevStats = newStats2;
+          }
+        } catch (error) {
+          this.fsw._remove(dirname3, basename3);
+        }
+      } else if (parent.has(basename3)) {
+        const at2 = newStats.atimeMs;
+        const mt = newStats.mtimeMs;
+        if (!at2 || at2 <= mt || mt !== prevStats.mtimeMs) {
+          this.fsw._emit(EV.CHANGE, file, newStats);
+        }
+        prevStats = newStats;
+      }
+    };
+    const closer = this._watchWithNodeFs(file, listener);
+    if (!(initialAdd && this.fsw.options.ignoreInitial) && this.fsw._isntIgnored(file)) {
+      if (!this.fsw._throttle(EV.ADD, file, 0))
+        return;
+      this.fsw._emit(EV.ADD, file, stats);
+    }
+    return closer;
+  }
+  /**
+   * Handle symlinks encountered while reading a dir.
+   * @param entry returned by readdirp
+   * @param directory path of dir being read
+   * @param path of this item
+   * @param item basename of this item
+   * @returns true if no more processing is needed for this entry.
+   */
+  async _handleSymlink(entry, directory, path6, item) {
+    if (this.fsw.closed) {
+      return;
+    }
+    const full = entry.fullPath;
+    const dir = this.fsw._getWatchedDir(directory);
+    if (!this.fsw.options.followSymlinks) {
+      this.fsw._incrReadyCount();
+      let linkPath;
+      try {
+        linkPath = await fsrealpath(path6);
+      } catch (e) {
+        this.fsw._emitReady();
+        return true;
+      }
+      if (this.fsw.closed)
+        return;
+      if (dir.has(item)) {
+        if (this.fsw._symlinkPaths.get(full) !== linkPath) {
+          this.fsw._symlinkPaths.set(full, linkPath);
+          this.fsw._emit(EV.CHANGE, path6, entry.stats);
+        }
+      } else {
+        dir.add(item);
+        this.fsw._symlinkPaths.set(full, linkPath);
+        this.fsw._emit(EV.ADD, path6, entry.stats);
+      }
+      this.fsw._emitReady();
+      return true;
+    }
+    if (this.fsw._symlinkPaths.has(full)) {
+      return true;
+    }
+    this.fsw._symlinkPaths.set(full, true);
+  }
+  _handleRead(directory, initialAdd, wh, target, dir, depth, throttler) {
+    directory = sysPath.join(directory, "");
+    throttler = this.fsw._throttle("readdir", directory, 1e3);
+    if (!throttler)
+      return;
+    const previous = this.fsw._getWatchedDir(wh.path);
+    const current2 = /* @__PURE__ */ new Set();
+    let stream = this.fsw._readdirp(directory, {
+      fileFilter: (entry) => wh.filterPath(entry),
+      directoryFilter: (entry) => wh.filterDir(entry)
+    });
+    if (!stream)
+      return;
+    stream.on(STR_DATA, async (entry) => {
+      if (this.fsw.closed) {
+        stream = void 0;
+        return;
+      }
+      const item = entry.path;
+      let path6 = sysPath.join(directory, item);
+      current2.add(item);
+      if (entry.stats.isSymbolicLink() && await this._handleSymlink(entry, directory, path6, item)) {
+        return;
+      }
+      if (this.fsw.closed) {
+        stream = void 0;
+        return;
+      }
+      if (item === target || !target && !previous.has(item)) {
+        this.fsw._incrReadyCount();
+        path6 = sysPath.join(dir, sysPath.relative(dir, path6));
+        this._addToNodeFs(path6, initialAdd, wh, depth + 1);
+      }
+    }).on(EV.ERROR, this._boundHandleError);
+    return new Promise((resolve3, reject) => {
+      if (!stream)
+        return reject();
+      stream.once(STR_END, () => {
+        if (this.fsw.closed) {
+          stream = void 0;
+          return;
+        }
+        const wasThrottled = throttler ? throttler.clear() : false;
+        resolve3(void 0);
+        previous.getChildren().filter((item) => {
+          return item !== directory && !current2.has(item);
+        }).forEach((item) => {
+          this.fsw._remove(directory, item);
+        });
+        stream = void 0;
+        if (wasThrottled)
+          this._handleRead(directory, false, wh, target, dir, depth, throttler);
+      });
+    });
+  }
+  /**
+   * Read directory to add / remove files from `@watched` list and re-read it on change.
+   * @param dir fs path
+   * @param stats
+   * @param initialAdd
+   * @param depth relative to user-supplied path
+   * @param target child path targeted for watch
+   * @param wh Common watch helpers for this path
+   * @param realpath
+   * @returns closer for the watcher instance.
+   */
+  async _handleDir(dir, stats, initialAdd, depth, target, wh, realpath2) {
+    const parentDir = this.fsw._getWatchedDir(sysPath.dirname(dir));
+    const tracked = parentDir.has(sysPath.basename(dir));
+    if (!(initialAdd && this.fsw.options.ignoreInitial) && !target && !tracked) {
+      this.fsw._emit(EV.ADD_DIR, dir, stats);
+    }
+    parentDir.add(sysPath.basename(dir));
+    this.fsw._getWatchedDir(dir);
+    let throttler;
+    let closer;
+    const oDepth = this.fsw.options.depth;
+    if ((oDepth == null || depth <= oDepth) && !this.fsw._symlinkPaths.has(realpath2)) {
+      if (!target) {
+        await this._handleRead(dir, initialAdd, wh, target, dir, depth, throttler);
+        if (this.fsw.closed)
+          return;
+      }
+      closer = this._watchWithNodeFs(dir, (dirPath, stats2) => {
+        if (stats2 && stats2.mtimeMs === 0)
+          return;
+        this._handleRead(dirPath, false, wh, target, dir, depth, throttler);
+      });
+    }
+    return closer;
+  }
+  /**
+   * Handle added file, directory, or glob pattern.
+   * Delegates call to _handleFile / _handleDir after checks.
+   * @param path to file or ir
+   * @param initialAdd was the file added at watch instantiation?
+   * @param priorWh depth relative to user-supplied path
+   * @param depth Child path actually targeted for watch
+   * @param target Child path actually targeted for watch
+   */
+  async _addToNodeFs(path6, initialAdd, priorWh, depth, target) {
+    const ready = this.fsw._emitReady;
+    if (this.fsw._isIgnored(path6) || this.fsw.closed) {
+      ready();
+      return false;
+    }
+    const wh = this.fsw._getWatchHelpers(path6);
+    if (priorWh) {
+      wh.filterPath = (entry) => priorWh.filterPath(entry);
+      wh.filterDir = (entry) => priorWh.filterDir(entry);
+    }
+    try {
+      const stats = await statMethods[wh.statMethod](wh.watchPath);
+      if (this.fsw.closed)
+        return;
+      if (this.fsw._isIgnored(wh.watchPath, stats)) {
+        ready();
+        return false;
+      }
+      const follow = this.fsw.options.followSymlinks;
+      let closer;
+      if (stats.isDirectory()) {
+        const absPath = sysPath.resolve(path6);
+        const targetPath = follow ? await fsrealpath(path6) : path6;
+        if (this.fsw.closed)
+          return;
+        closer = await this._handleDir(wh.watchPath, stats, initialAdd, depth, target, wh, targetPath);
+        if (this.fsw.closed)
+          return;
+        if (absPath !== targetPath && targetPath !== void 0) {
+          this.fsw._symlinkPaths.set(absPath, targetPath);
+        }
+      } else if (stats.isSymbolicLink()) {
+        const targetPath = follow ? await fsrealpath(path6) : path6;
+        if (this.fsw.closed)
+          return;
+        const parent = sysPath.dirname(wh.watchPath);
+        this.fsw._getWatchedDir(parent).add(wh.watchPath);
+        this.fsw._emit(EV.ADD, wh.watchPath, stats);
+        closer = await this._handleDir(parent, stats, initialAdd, depth, path6, wh, targetPath);
+        if (this.fsw.closed)
+          return;
+        if (targetPath !== void 0) {
+          this.fsw._symlinkPaths.set(sysPath.resolve(path6), targetPath);
+        }
+      } else {
+        closer = this._handleFile(wh.watchPath, stats, initialAdd);
+      }
+      ready();
+      if (closer)
+        this.fsw._addPathCloser(path6, closer);
+      return false;
+    } catch (error) {
+      if (this.fsw._handleError(error)) {
+        ready();
+        return path6;
+      }
+    }
+  }
+};
+
+// node_modules/chokidar/esm/index.js
+var SLASH = "/";
+var SLASH_SLASH = "//";
+var ONE_DOT = ".";
+var TWO_DOTS = "..";
+var STRING_TYPE = "string";
+var BACK_SLASH_RE = /\\/g;
+var DOUBLE_SLASH_RE = /\/\//;
+var DOT_RE = /\..*\.(sw[px])$|~$|\.subl.*\.tmp/;
+var REPLACER_RE = /^\.[/\\]/;
+function arrify(item) {
+  return Array.isArray(item) ? item : [item];
+}
+var isMatcherObject = (matcher) => typeof matcher === "object" && matcher !== null && !(matcher instanceof RegExp);
+function createPattern(matcher) {
+  if (typeof matcher === "function")
+    return matcher;
+  if (typeof matcher === "string")
+    return (string) => matcher === string;
+  if (matcher instanceof RegExp)
+    return (string) => matcher.test(string);
+  if (typeof matcher === "object" && matcher !== null) {
+    return (string) => {
+      if (matcher.path === string)
+        return true;
+      if (matcher.recursive) {
+        const relative3 = sysPath2.relative(matcher.path, string);
+        if (!relative3) {
+          return false;
+        }
+        return !relative3.startsWith("..") && !sysPath2.isAbsolute(relative3);
+      }
+      return false;
+    };
+  }
+  return () => false;
+}
+function normalizePath(path6) {
+  if (typeof path6 !== "string")
+    throw new Error("string expected");
+  path6 = sysPath2.normalize(path6);
+  path6 = path6.replace(/\\/g, "/");
+  let prepend = false;
+  if (path6.startsWith("//"))
+    prepend = true;
+  const DOUBLE_SLASH_RE2 = /\/\//;
+  while (path6.match(DOUBLE_SLASH_RE2))
+    path6 = path6.replace(DOUBLE_SLASH_RE2, "/");
+  if (prepend)
+    path6 = "/" + path6;
+  return path6;
+}
+function matchPatterns(patterns, testString, stats) {
+  const path6 = normalizePath(testString);
+  for (let index = 0; index < patterns.length; index++) {
+    const pattern = patterns[index];
+    if (pattern(path6, stats)) {
+      return true;
+    }
+  }
+  return false;
+}
+function anymatch(matchers, testString) {
+  if (matchers == null) {
+    throw new TypeError("anymatch: specify first argument");
+  }
+  const matchersArray = arrify(matchers);
+  const patterns = matchersArray.map((matcher) => createPattern(matcher));
+  if (testString == null) {
+    return (testString2, stats) => {
+      return matchPatterns(patterns, testString2, stats);
+    };
+  }
+  return matchPatterns(patterns, testString);
+}
+var unifyPaths = (paths_) => {
+  const paths = arrify(paths_).flat();
+  if (!paths.every((p) => typeof p === STRING_TYPE)) {
+    throw new TypeError(`Non-string provided as watch path: ${paths}`);
+  }
+  return paths.map(normalizePathToUnix);
+};
+var toUnix = (string) => {
+  let str = string.replace(BACK_SLASH_RE, SLASH);
+  let prepend = false;
+  if (str.startsWith(SLASH_SLASH)) {
+    prepend = true;
+  }
+  while (str.match(DOUBLE_SLASH_RE)) {
+    str = str.replace(DOUBLE_SLASH_RE, SLASH);
+  }
+  if (prepend) {
+    str = SLASH + str;
+  }
+  return str;
+};
+var normalizePathToUnix = (path6) => toUnix(sysPath2.normalize(toUnix(path6)));
+var normalizeIgnored = (cwd = "") => (path6) => {
+  if (typeof path6 === "string") {
+    return normalizePathToUnix(sysPath2.isAbsolute(path6) ? path6 : sysPath2.join(cwd, path6));
+  } else {
+    return path6;
+  }
+};
+var getAbsolutePath = (path6, cwd) => {
+  if (sysPath2.isAbsolute(path6)) {
+    return path6;
+  }
+  return sysPath2.join(cwd, path6);
+};
+var EMPTY_SET = Object.freeze(/* @__PURE__ */ new Set());
+var DirEntry = class {
+  constructor(dir, removeWatcher) {
+    this.path = dir;
+    this._removeWatcher = removeWatcher;
+    this.items = /* @__PURE__ */ new Set();
+  }
+  add(item) {
+    const { items } = this;
+    if (!items)
+      return;
+    if (item !== ONE_DOT && item !== TWO_DOTS)
+      items.add(item);
+  }
+  async remove(item) {
+    const { items } = this;
+    if (!items)
+      return;
+    items.delete(item);
+    if (items.size > 0)
+      return;
+    const dir = this.path;
+    try {
+      await readdir2(dir);
+    } catch (err) {
+      if (this._removeWatcher) {
+        this._removeWatcher(sysPath2.dirname(dir), sysPath2.basename(dir));
+      }
+    }
+  }
+  has(item) {
+    const { items } = this;
+    if (!items)
+      return;
+    return items.has(item);
+  }
+  getChildren() {
+    const { items } = this;
+    if (!items)
+      return [];
+    return [...items.values()];
+  }
+  dispose() {
+    this.items.clear();
+    this.path = "";
+    this._removeWatcher = EMPTY_FN;
+    this.items = EMPTY_SET;
+    Object.freeze(this);
+  }
+};
+var STAT_METHOD_F = "stat";
+var STAT_METHOD_L = "lstat";
+var WatchHelper = class {
+  constructor(path6, follow, fsw) {
+    this.fsw = fsw;
+    const watchPath = path6;
+    this.path = path6 = path6.replace(REPLACER_RE, "");
+    this.watchPath = watchPath;
+    this.fullWatchPath = sysPath2.resolve(watchPath);
+    this.dirParts = [];
+    this.dirParts.forEach((parts) => {
+      if (parts.length > 1)
+        parts.pop();
+    });
+    this.followSymlinks = follow;
+    this.statMethod = follow ? STAT_METHOD_F : STAT_METHOD_L;
+  }
+  entryPath(entry) {
+    return sysPath2.join(this.watchPath, sysPath2.relative(this.watchPath, entry.fullPath));
+  }
+  filterPath(entry) {
+    const { stats } = entry;
+    if (stats && stats.isSymbolicLink())
+      return this.filterDir(entry);
+    const resolvedPath = this.entryPath(entry);
+    return this.fsw._isntIgnored(resolvedPath, stats) && this.fsw._hasReadPermissions(stats);
+  }
+  filterDir(entry) {
+    return this.fsw._isntIgnored(this.entryPath(entry), entry.stats);
+  }
+};
+var FSWatcher = class extends EventEmitter {
+  // Not indenting methods for history sake; for now.
+  constructor(_opts = {}) {
+    super();
+    this.closed = false;
+    this._closers = /* @__PURE__ */ new Map();
+    this._ignoredPaths = /* @__PURE__ */ new Set();
+    this._throttled = /* @__PURE__ */ new Map();
+    this._streams = /* @__PURE__ */ new Set();
+    this._symlinkPaths = /* @__PURE__ */ new Map();
+    this._watched = /* @__PURE__ */ new Map();
+    this._pendingWrites = /* @__PURE__ */ new Map();
+    this._pendingUnlinks = /* @__PURE__ */ new Map();
+    this._readyCount = 0;
+    this._readyEmitted = false;
+    const awf = _opts.awaitWriteFinish;
+    const DEF_AWF = { stabilityThreshold: 2e3, pollInterval: 100 };
+    const opts = {
+      // Defaults
+      persistent: true,
+      ignoreInitial: false,
+      ignorePermissionErrors: false,
+      interval: 100,
+      binaryInterval: 300,
+      followSymlinks: true,
+      usePolling: false,
+      // useAsync: false,
+      atomic: true,
+      // NOTE: overwritten later (depends on usePolling)
+      ..._opts,
+      // Change format
+      ignored: _opts.ignored ? arrify(_opts.ignored) : arrify([]),
+      awaitWriteFinish: awf === true ? DEF_AWF : typeof awf === "object" ? { ...DEF_AWF, ...awf } : false
+    };
+    if (isIBMi)
+      opts.usePolling = true;
+    if (opts.atomic === void 0)
+      opts.atomic = !opts.usePolling;
+    const envPoll = process.env.CHOKIDAR_USEPOLLING;
+    if (envPoll !== void 0) {
+      const envLower = envPoll.toLowerCase();
+      if (envLower === "false" || envLower === "0")
+        opts.usePolling = false;
+      else if (envLower === "true" || envLower === "1")
+        opts.usePolling = true;
+      else
+        opts.usePolling = !!envLower;
+    }
+    const envInterval = process.env.CHOKIDAR_INTERVAL;
+    if (envInterval)
+      opts.interval = Number.parseInt(envInterval, 10);
+    let readyCalls = 0;
+    this._emitReady = () => {
+      readyCalls++;
+      if (readyCalls >= this._readyCount) {
+        this._emitReady = EMPTY_FN;
+        this._readyEmitted = true;
+        process.nextTick(() => this.emit(EVENTS.READY));
+      }
+    };
+    this._emitRaw = (...args) => this.emit(EVENTS.RAW, ...args);
+    this._boundRemove = this._remove.bind(this);
+    this.options = opts;
+    this._nodeFsHandler = new NodeFsHandler(this);
+    Object.freeze(opts);
+  }
+  _addIgnoredPath(matcher) {
+    if (isMatcherObject(matcher)) {
+      for (const ignored of this._ignoredPaths) {
+        if (isMatcherObject(ignored) && ignored.path === matcher.path && ignored.recursive === matcher.recursive) {
+          return;
+        }
+      }
+    }
+    this._ignoredPaths.add(matcher);
+  }
+  _removeIgnoredPath(matcher) {
+    this._ignoredPaths.delete(matcher);
+    if (typeof matcher === "string") {
+      for (const ignored of this._ignoredPaths) {
+        if (isMatcherObject(ignored) && ignored.path === matcher) {
+          this._ignoredPaths.delete(ignored);
+        }
+      }
+    }
+  }
+  // Public methods
+  /**
+   * Adds paths to be watched on an existing FSWatcher instance.
+   * @param paths_ file or file list. Other arguments are unused
+   */
+  add(paths_, _origAdd, _internal) {
+    const { cwd } = this.options;
+    this.closed = false;
+    this._closePromise = void 0;
+    let paths = unifyPaths(paths_);
+    if (cwd) {
+      paths = paths.map((path6) => {
+        const absPath = getAbsolutePath(path6, cwd);
+        return absPath;
+      });
+    }
+    paths.forEach((path6) => {
+      this._removeIgnoredPath(path6);
+    });
+    this._userIgnored = void 0;
+    if (!this._readyCount)
+      this._readyCount = 0;
+    this._readyCount += paths.length;
+    Promise.all(paths.map(async (path6) => {
+      const res = await this._nodeFsHandler._addToNodeFs(path6, !_internal, void 0, 0, _origAdd);
+      if (res)
+        this._emitReady();
+      return res;
+    })).then((results) => {
+      if (this.closed)
+        return;
+      results.forEach((item) => {
+        if (item)
+          this.add(sysPath2.dirname(item), sysPath2.basename(_origAdd || item));
+      });
+    });
+    return this;
+  }
+  /**
+   * Close watchers or start ignoring events from specified paths.
+   */
+  unwatch(paths_) {
+    if (this.closed)
+      return this;
+    const paths = unifyPaths(paths_);
+    const { cwd } = this.options;
+    paths.forEach((path6) => {
+      if (!sysPath2.isAbsolute(path6) && !this._closers.has(path6)) {
+        if (cwd)
+          path6 = sysPath2.join(cwd, path6);
+        path6 = sysPath2.resolve(path6);
+      }
+      this._closePath(path6);
+      this._addIgnoredPath(path6);
+      if (this._watched.has(path6)) {
+        this._addIgnoredPath({
+          path: path6,
+          recursive: true
+        });
+      }
+      this._userIgnored = void 0;
+    });
+    return this;
+  }
+  /**
+   * Close watchers and remove all listeners from watched paths.
+   */
+  close() {
+    if (this._closePromise) {
+      return this._closePromise;
+    }
+    this.closed = true;
+    this.removeAllListeners();
+    const closers = [];
+    this._closers.forEach((closerList) => closerList.forEach((closer) => {
+      const promise = closer();
+      if (promise instanceof Promise)
+        closers.push(promise);
+    }));
+    this._streams.forEach((stream) => stream.destroy());
+    this._userIgnored = void 0;
+    this._readyCount = 0;
+    this._readyEmitted = false;
+    this._watched.forEach((dirent) => dirent.dispose());
+    this._closers.clear();
+    this._watched.clear();
+    this._streams.clear();
+    this._symlinkPaths.clear();
+    this._throttled.clear();
+    this._closePromise = closers.length ? Promise.all(closers).then(() => void 0) : Promise.resolve();
+    return this._closePromise;
+  }
+  /**
+   * Expose list of watched paths
+   * @returns for chaining
+   */
+  getWatched() {
+    const watchList = {};
+    this._watched.forEach((entry, dir) => {
+      const key = this.options.cwd ? sysPath2.relative(this.options.cwd, dir) : dir;
+      const index = key || ONE_DOT;
+      watchList[index] = entry.getChildren().sort();
+    });
+    return watchList;
+  }
+  emitWithAll(event, args) {
+    this.emit(event, ...args);
+    if (event !== EVENTS.ERROR)
+      this.emit(EVENTS.ALL, event, ...args);
+  }
+  // Common helpers
+  // --------------
+  /**
+   * Normalize and emit events.
+   * Calling _emit DOES NOT MEAN emit() would be called!
+   * @param event Type of event
+   * @param path File or directory path
+   * @param stats arguments to be passed with event
+   * @returns the error if defined, otherwise the value of the FSWatcher instance's `closed` flag
+   */
+  async _emit(event, path6, stats) {
+    if (this.closed)
+      return;
+    const opts = this.options;
+    if (isWindows)
+      path6 = sysPath2.normalize(path6);
+    if (opts.cwd)
+      path6 = sysPath2.relative(opts.cwd, path6);
+    const args = [path6];
+    if (stats != null)
+      args.push(stats);
+    const awf = opts.awaitWriteFinish;
+    let pw;
+    if (awf && (pw = this._pendingWrites.get(path6))) {
+      pw.lastChange = /* @__PURE__ */ new Date();
+      return this;
+    }
+    if (opts.atomic) {
+      if (event === EVENTS.UNLINK) {
+        this._pendingUnlinks.set(path6, [event, ...args]);
+        setTimeout(() => {
+          this._pendingUnlinks.forEach((entry, path7) => {
+            this.emit(...entry);
+            this.emit(EVENTS.ALL, ...entry);
+            this._pendingUnlinks.delete(path7);
+          });
+        }, typeof opts.atomic === "number" ? opts.atomic : 100);
+        return this;
+      }
+      if (event === EVENTS.ADD && this._pendingUnlinks.has(path6)) {
+        event = EVENTS.CHANGE;
+        this._pendingUnlinks.delete(path6);
+      }
+    }
+    if (awf && (event === EVENTS.ADD || event === EVENTS.CHANGE) && this._readyEmitted) {
+      const awfEmit = (err, stats2) => {
+        if (err) {
+          event = EVENTS.ERROR;
+          args[0] = err;
+          this.emitWithAll(event, args);
+        } else if (stats2) {
+          if (args.length > 1) {
+            args[1] = stats2;
+          } else {
+            args.push(stats2);
+          }
+          this.emitWithAll(event, args);
+        }
+      };
+      this._awaitWriteFinish(path6, awf.stabilityThreshold, event, awfEmit);
+      return this;
+    }
+    if (event === EVENTS.CHANGE) {
+      const isThrottled = !this._throttle(EVENTS.CHANGE, path6, 50);
+      if (isThrottled)
+        return this;
+    }
+    if (opts.alwaysStat && stats === void 0 && (event === EVENTS.ADD || event === EVENTS.ADD_DIR || event === EVENTS.CHANGE)) {
+      const fullPath = opts.cwd ? sysPath2.join(opts.cwd, path6) : path6;
+      let stats2;
+      try {
+        stats2 = await stat3(fullPath);
+      } catch (err) {
+      }
+      if (!stats2 || this.closed)
+        return;
+      args.push(stats2);
+    }
+    this.emitWithAll(event, args);
+    return this;
+  }
+  /**
+   * Common handler for errors
+   * @returns The error if defined, otherwise the value of the FSWatcher instance's `closed` flag
+   */
+  _handleError(error) {
+    const code = error && error.code;
+    if (error && code !== "ENOENT" && code !== "ENOTDIR" && (!this.options.ignorePermissionErrors || code !== "EPERM" && code !== "EACCES")) {
+      this.emit(EVENTS.ERROR, error);
+    }
+    return error || this.closed;
+  }
+  /**
+   * Helper utility for throttling
+   * @param actionType type being throttled
+   * @param path being acted upon
+   * @param timeout duration of time to suppress duplicate actions
+   * @returns tracking object or false if action should be suppressed
+   */
+  _throttle(actionType, path6, timeout) {
+    if (!this._throttled.has(actionType)) {
+      this._throttled.set(actionType, /* @__PURE__ */ new Map());
+    }
+    const action = this._throttled.get(actionType);
+    if (!action)
+      throw new Error("invalid throttle");
+    const actionPath = action.get(path6);
+    if (actionPath) {
+      actionPath.count++;
+      return false;
+    }
+    let timeoutObject;
+    const clear = () => {
+      const item = action.get(path6);
+      const count = item ? item.count : 0;
+      action.delete(path6);
+      clearTimeout(timeoutObject);
+      if (item)
+        clearTimeout(item.timeoutObject);
+      return count;
+    };
+    timeoutObject = setTimeout(clear, timeout);
+    const thr = { timeoutObject, clear, count: 0 };
+    action.set(path6, thr);
+    return thr;
+  }
+  _incrReadyCount() {
+    return this._readyCount++;
+  }
+  /**
+   * Awaits write operation to finish.
+   * Polls a newly created file for size variations. When files size does not change for 'threshold' milliseconds calls callback.
+   * @param path being acted upon
+   * @param threshold Time in milliseconds a file size must be fixed before acknowledging write OP is finished
+   * @param event
+   * @param awfEmit Callback to be called when ready for event to be emitted.
+   */
+  _awaitWriteFinish(path6, threshold, event, awfEmit) {
+    const awf = this.options.awaitWriteFinish;
+    if (typeof awf !== "object")
+      return;
+    const pollInterval = awf.pollInterval;
+    let timeoutHandler;
+    let fullPath = path6;
+    if (this.options.cwd && !sysPath2.isAbsolute(path6)) {
+      fullPath = sysPath2.join(this.options.cwd, path6);
+    }
+    const now = /* @__PURE__ */ new Date();
+    const writes = this._pendingWrites;
+    function awaitWriteFinishFn(prevStat) {
+      statcb(fullPath, (err, curStat) => {
+        if (err || !writes.has(path6)) {
+          if (err && err.code !== "ENOENT")
+            awfEmit(err);
+          return;
+        }
+        const now2 = Number(/* @__PURE__ */ new Date());
+        if (prevStat && curStat.size !== prevStat.size) {
+          writes.get(path6).lastChange = now2;
+        }
+        const pw = writes.get(path6);
+        const df = now2 - pw.lastChange;
+        if (df >= threshold) {
+          writes.delete(path6);
+          awfEmit(void 0, curStat);
+        } else {
+          timeoutHandler = setTimeout(awaitWriteFinishFn, pollInterval, curStat);
+        }
+      });
+    }
+    if (!writes.has(path6)) {
+      writes.set(path6, {
+        lastChange: now,
+        cancelWait: () => {
+          writes.delete(path6);
+          clearTimeout(timeoutHandler);
+          return event;
+        }
+      });
+      timeoutHandler = setTimeout(awaitWriteFinishFn, pollInterval);
+    }
+  }
+  /**
+   * Determines whether user has asked to ignore this path.
+   */
+  _isIgnored(path6, stats) {
+    if (this.options.atomic && DOT_RE.test(path6))
+      return true;
+    if (!this._userIgnored) {
+      const { cwd } = this.options;
+      const ign = this.options.ignored;
+      const ignored = (ign || []).map(normalizeIgnored(cwd));
+      const ignoredPaths = [...this._ignoredPaths];
+      const list2 = [...ignoredPaths.map(normalizeIgnored(cwd)), ...ignored];
+      this._userIgnored = anymatch(list2, void 0);
+    }
+    return this._userIgnored(path6, stats);
+  }
+  _isntIgnored(path6, stat4) {
+    return !this._isIgnored(path6, stat4);
+  }
+  /**
+   * Provides a set of common helpers and properties relating to symlink handling.
+   * @param path file or directory pattern being watched
+   */
+  _getWatchHelpers(path6) {
+    return new WatchHelper(path6, this.options.followSymlinks, this);
+  }
+  // Directory helpers
+  // -----------------
+  /**
+   * Provides directory tracking objects
+   * @param directory path of the directory
+   */
+  _getWatchedDir(directory) {
+    const dir = sysPath2.resolve(directory);
+    if (!this._watched.has(dir))
+      this._watched.set(dir, new DirEntry(dir, this._boundRemove));
+    return this._watched.get(dir);
+  }
+  // File helpers
+  // ------------
+  /**
+   * Check for read permissions: https://stackoverflow.com/a/11781404/1358405
+   */
+  _hasReadPermissions(stats) {
+    if (this.options.ignorePermissionErrors)
+      return true;
+    return Boolean(Number(stats.mode) & 256);
+  }
+  /**
+   * Handles emitting unlink events for
+   * files and directories, and via recursion, for
+   * files and directories within directories that are unlinked
+   * @param directory within which the following item is located
+   * @param item      base path of item/directory
+   */
+  _remove(directory, item, isDirectory) {
+    const path6 = sysPath2.join(directory, item);
+    const fullPath = sysPath2.resolve(path6);
+    isDirectory = isDirectory != null ? isDirectory : this._watched.has(path6) || this._watched.has(fullPath);
+    if (!this._throttle("remove", path6, 100))
+      return;
+    if (!isDirectory && this._watched.size === 1) {
+      this.add(directory, item, true);
+    }
+    const wp = this._getWatchedDir(path6);
+    const nestedDirectoryChildren = wp.getChildren();
+    nestedDirectoryChildren.forEach((nested) => this._remove(path6, nested));
+    const parent = this._getWatchedDir(directory);
+    const wasTracked = parent.has(item);
+    parent.remove(item);
+    if (this._symlinkPaths.has(fullPath)) {
+      this._symlinkPaths.delete(fullPath);
+    }
+    let relPath = path6;
+    if (this.options.cwd)
+      relPath = sysPath2.relative(this.options.cwd, path6);
+    if (this.options.awaitWriteFinish && this._pendingWrites.has(relPath)) {
+      const event = this._pendingWrites.get(relPath).cancelWait();
+      if (event === EVENTS.ADD)
+        return;
+    }
+    this._watched.delete(path6);
+    this._watched.delete(fullPath);
+    const eventName = isDirectory ? EVENTS.UNLINK_DIR : EVENTS.UNLINK;
+    if (wasTracked && !this._isIgnored(path6))
+      this._emit(eventName, path6);
+    this._closePath(path6);
+  }
+  /**
+   * Closes all watchers for a path
+   */
+  _closePath(path6) {
+    this._closeFile(path6);
+    const dir = sysPath2.dirname(path6);
+    this._getWatchedDir(dir).remove(sysPath2.basename(path6));
+  }
+  /**
+   * Closes only file-specific watchers
+   */
+  _closeFile(path6) {
+    const closers = this._closers.get(path6);
+    if (!closers)
+      return;
+    closers.forEach((closer) => closer());
+    this._closers.delete(path6);
+  }
+  _addPathCloser(path6, closer) {
+    if (!closer)
+      return;
+    let list2 = this._closers.get(path6);
+    if (!list2) {
+      list2 = [];
+      this._closers.set(path6, list2);
+    }
+    list2.push(closer);
+  }
+  _readdirp(root, opts) {
+    if (this.closed)
+      return;
+    const options = { type: EVENTS.ALL, alwaysStat: true, lstat: true, ...opts, depth: 0 };
+    let stream = readdirp(root, options);
+    this._streams.add(stream);
+    stream.once(STR_CLOSE, () => {
+      stream = void 0;
+    });
+    stream.once(STR_END, () => {
+      if (stream) {
+        this._streams.delete(stream);
+        stream = void 0;
+      }
+    });
+    return stream;
+  }
+};
+function watch(paths, options = {}) {
+  const watcher = new FSWatcher(options);
+  watcher.add(paths);
+  return watcher;
+}
+
 // src/scanner/watcher.ts
-var ignoredParts = ["/node_modules/", "/.git/", "/dist/", "/build/", "/coverage/"];
+var debounceMs = 250;
 var Watcher = class {
-  constructor(onChange, debounceMs = 250) {
+  constructor(onChange) {
     this.onChange = onChange;
-    this.debounceMs = debounceMs;
   }
   onChange;
-  debounceMs;
   watcher;
   timer;
   watch(rootPath) {
-    void Promise.resolve().then(() => (init_esm2(), esm_exports)).then((module) => {
-      const watcher = module.default.watch(rootPath, {
-        ignored: (filePath) => isIgnored(filePath),
-        ignoreInitial: true
+    const watcher = watch(rootPath, {
+      ignored: (filePath) => isSkippedPath(rootPath, filePath),
+      ignoreInitial: true
+    });
+    for (const event of ["add", "change", "unlink"]) {
+      watcher.on(event, (filePath) => {
+        if (isSourceFile(filePath)) {
+          this.trigger();
+        }
       });
-      for (const event of ["add", "change", "unlink"]) {
-        watcher.on(event, (filePath) => this.schedule(filePath));
-      }
-      watcher.on("error", () => void 0);
-      this.watcher = watcher;
-    }).catch(() => void 0);
-  }
-  close() {
-    if (this.timer !== void 0) {
-      clearTimeout(this.timer);
-      this.timer = void 0;
     }
-    void this.watcher?.close();
-    this.watcher = void 0;
+    watcher.on("error", (error) => log(`file watcher error: ${errorMessage(error)}`));
+    this.watcher = watcher;
   }
   trigger() {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = void 0;
       this.onChange();
-    }, this.debounceMs);
+    }, debounceMs);
   }
-  schedule(filePath) {
-    if (filePath.endsWith(".js")) {
-      this.trigger();
-    }
+  close() {
+    clearTimeout(this.timer);
+    this.timer = void 0;
+    void this.watcher?.close();
+    this.watcher = void 0;
   }
 };
-function isIgnored(filePath) {
-  return ignoredParts.some((part) => filePath.includes(part));
-}
+
+// src/scanner/workspace.ts
+var Workspace = class {
+  constructor(rootPath, onScan) {
+    this.rootPath = rootPath;
+    this.onScan = onScan;
+    this.moleculer = isMoleculerWorkspace(rootPath);
+  }
+  rootPath;
+  onScan;
+  index = new Index();
+  scanner = new Scanner(this.index);
+  resolution = this.scanner.resolution;
+  watcher = new Watcher(() => this.scan());
+  moleculer;
+  scanFailure;
+  get failure() {
+    return this.scanFailure;
+  }
+  start() {
+    this.scan();
+    if (this.moleculer) {
+      this.watcher.watch(this.rootPath);
+    } else {
+      log(`no moleculer.config.* or moleculer dependency at or above ${this.rootPath}; index disabled`);
+    }
+  }
+  changed() {
+    this.watcher.trigger();
+  }
+  close() {
+    this.watcher.close();
+  }
+  files() {
+    return this.moleculer ? collectFiles(this.rootPath) : [];
+  }
+  scan() {
+    const started = Date.now();
+    let result;
+    try {
+      result = this.scanner.scan(this.files());
+    } catch (error) {
+      this.scanFailure = errorMessage(error);
+      log(`scan failed: ${this.scanFailure}`);
+      return;
+    }
+    this.scanFailure = void 0;
+    const stats = this.index.stats();
+    log(`indexed ${stats.symbolCount} symbols in ${result.fileCount} files (${Date.now() - started}ms)`);
+    log(`references ${stats.referenceCount}, unresolved ${result.dropped.length}, mixin failures ${result.mixinFailures.length}`);
+    this.onScan(result);
+  }
+};
+
+// package.json
+var package_default = {
+  name: "moleculer-lsp",
+  version: "0.4.0",
+  description: "Language server for Moleculer.js: go to definition, find references, document symbols and diagnostics across services, mixins and events",
+  keywords: [
+    "moleculer",
+    "moleculerjs",
+    "lsp",
+    "language-server",
+    "microservices",
+    "javascript"
+  ],
+  homepage: "https://github.com/Anshuman115/moleculer-lsp#readme",
+  bugs: {
+    url: "https://github.com/Anshuman115/moleculer-lsp/issues"
+  },
+  repository: {
+    type: "git",
+    url: "git+https://github.com/Anshuman115/moleculer-lsp.git"
+  },
+  license: "Apache-2.0",
+  author: "Anshuman Tripathy",
+  type: "module",
+  main: "dist/main.js",
+  bin: {
+    "moleculer-lsp": "dist/main.js"
+  },
+  files: [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  engines: {
+    node: ">=18"
+  },
+  scripts: {
+    build: "tsc --noEmit && npm run bundle",
+    bundle: `esbuild src/main.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/main.js --banner:js="import{createRequire as createBundledRequire}from'node:module';const require=createBundledRequire(import.meta.url);"`,
+    typecheck: "tsc --noEmit",
+    test: "vitest run src",
+    dev: "tsx src/main.ts",
+    prepublishOnly: "npm run build && npm test",
+    bench: "node scripts/benchmark.mjs"
+  },
+  devDependencies: {
+    "@types/node": "^22.10.2",
+    acorn: "^8.16.0",
+    chokidar: "^4.0.3",
+    esbuild: "^0.28.1",
+    tsx: "^4.19.2",
+    typescript: "7.0.2",
+    vitest: "^2.1.8"
+  },
+  dependencies: {
+    tsrs: "0.25.0-ts7.1.0-beta"
+  }
+};
+
+// src/version.ts
+var VERSION = package_default.version;
 
 // src/lsp/protocol.ts
 var SymbolKind2 = {
@@ -8442,7 +8323,6 @@ var DiagnosticSeverity = {
 };
 var ErrorCodes = {
   ParseError: -32700,
-  InvalidRequest: -32600,
   MethodNotFound: -32601,
   InvalidParams: -32602,
   InternalError: -32603,
@@ -8451,152 +8331,273 @@ var ErrorCodes = {
 function isRecord(value) {
   return typeof value === "object" && value !== null;
 }
+function spanRange(line2, character, length) {
+  return { start: { line: line2, character }, end: { line: line2, character: character + length } };
+}
+function textDocumentOf(params) {
+  const record = isRecord(params) ? params : {};
+  const document = isRecord(record.textDocument) ? record.textDocument : void 0;
+  if (document === void 0 || typeof document.uri !== "string") {
+    return void 0;
+  }
+  return { uri: document.uri, text: document.text };
+}
+function positionParams(params) {
+  const uri = textDocumentOf(params)?.uri;
+  const position = isRecord(params) && isRecord(params.position) ? params.position : {};
+  const { line: line2, character } = position;
+  if (uri === void 0 || typeof line2 !== "number" || typeof character !== "number") {
+    return void 0;
+  }
+  return { textDocument: { uri }, position: { line: line2, character } };
+}
+function referenceParams(params) {
+  const position = positionParams(params);
+  const context = isRecord(params) && isRecord(params.context) ? params.context : {};
+  return position === void 0 ? void 0 : { ...position, context: { includeDeclaration: context.includeDeclaration === true } };
+}
+function documentSymbolParams(params) {
+  const uri = textDocumentOf(params)?.uri;
+  return uri === void 0 ? void 0 : { textDocument: { uri } };
+}
 
 // src/lsp/diagnostics.ts
 var source = "moleculer";
-function diagnosticsByFile(index, scanner) {
+var referenceRules = {
+  ["name-collision" /* NameCollision */]: {
+    severity: DiagnosticSeverity.Error,
+    message: (name) => `"${name}" matches multiple services; target is ambiguous`
+  },
+  ["event-no-listener" /* EventNoListener */]: {
+    severity: DiagnosticSeverity.Hint,
+    message: (name) => `No local listener found for event "${name}"`
+  },
+  ["genuinely-unresolved" /* GenuinelyUnresolved */]: {
+    severity: DiagnosticSeverity.Hint,
+    message: (name) => `"${name}" is not defined in this workspace`
+  }
+};
+function diagnosticsByFile(index, result) {
   const byFile = /* @__PURE__ */ new Map();
-  const add = (fileId, diagnostic) => {
-    const existing = byFile.get(fileId);
-    if (existing === void 0) {
-      byFile.set(fileId, [diagnostic]);
-      return;
-    }
-    existing.push(diagnostic);
-  };
-  const result = scanner.result();
+  const add = (filePath, diagnostic) => appendTo(byFile, filePath, diagnostic);
   for (const failure of result.mixinFailures) {
-    add(index.fileId(failure.sourceFile), mixinDiagnostic(failure));
+    add(failure.filePath, mixinDiagnostic(failure));
   }
   for (const dropped of result.dropped) {
-    const diagnostic = referenceDiagnostic(dropped);
-    if (diagnostic !== void 0) {
-      add(dropped.location.fileId, diagnostic);
-    }
+    add(index.filePath(dropped.location.fileId), referenceDiagnostic(dropped));
   }
   for (const [fileId, diagnostic] of collisionDiagnostics(index)) {
-    add(fileId, diagnostic);
+    add(index.filePath(fileId), diagnostic);
   }
   return byFile;
 }
 function mixinDiagnostic(failure) {
-  const message = failure.reason === "broken-require-path" /* BrokenRequirePath */ ? `Mixin "${failure.mixinName}" does not resolve to a file${failure.requirePath.length > 0 ? ` (require "${failure.requirePath}")` : ""}` : `Mixin "${failure.mixinName}" cannot be applied: service has no resolvable name`;
   return {
-    range: zeroRange(),
+    range: spanRange(0, 0, 0),
     severity: DiagnosticSeverity.Error,
     source,
-    code: failure.reason,
-    message
+    code: "broken-require-path",
+    message: `Mixin "${failure.mixinName}" does not resolve to a file (require "${failure.requirePath}")`
   };
 }
 function referenceDiagnostic(dropped) {
-  const range2 = referenceRange(dropped);
-  if (dropped.reason === "name-collision" /* NameCollision */) {
-    return {
-      range: range2,
-      severity: DiagnosticSeverity.Error,
-      source,
-      code: dropped.reason,
-      message: `"${displayName(dropped.fullName)}" matches multiple services; target is ambiguous`
-    };
-  }
-  if (dropped.reason === "event-no-listener" /* EventNoListener */) {
-    return {
-      range: range2,
-      severity: DiagnosticSeverity.Hint,
-      source,
-      code: dropped.reason,
-      message: `No local listener found for event "${dropped.fullName}"`
-    };
-  }
-  if (dropped.reason === "genuinely-unresolved" /* GenuinelyUnresolved */) {
-    return {
-      range: range2,
-      severity: DiagnosticSeverity.Hint,
-      source,
-      code: dropped.reason,
-      message: `"${displayName(dropped.fullName)}" is not defined in this workspace`
-    };
-  }
-  return void 0;
+  const { line: line2, column: column2, length } = dropped.location;
+  const rule = referenceRules[dropped.reason];
+  const name = dropped.kind === "self" /* Self */ ? `this.${dropped.target}` : dropped.target;
+  const severity = dropped.kind === "self" /* Self */ && dropped.reason === "name-collision" /* NameCollision */ ? DiagnosticSeverity.Hint : rule.severity;
+  return { range: spanRange(line2, column2, length), severity, source, code: dropped.reason, message: rule.message(name) };
 }
 function collisionDiagnostics(index) {
-  const buckets = /* @__PURE__ */ new Map();
+  const declared = /* @__PURE__ */ new Map();
   for (const symbol of index.allSymbols()) {
-    if (symbol.kind !== "event" /* Event */ || symbol.fileId !== symbol.sourceFileId) {
-      continue;
+    if (symbol.kind === "event" /* Event */ && symbol.fileId === symbol.sourceFileId) {
+      appendTo(declared, symbol.name, symbol);
     }
-    const bucket = buckets.get(symbol.name) ?? [];
-    bucket.push({
-      fileId: symbol.fileId,
-      line: symbol.line,
-      column: symbol.column,
-      namespace: symbol.namespace,
-      length: symbol.name.length
-    });
-    buckets.set(symbol.name, bucket);
   }
   const results = [];
-  for (const [name, bucket] of buckets) {
-    const namespaces = new Set(bucket.map((entry) => entry.namespace));
-    if (namespaces.size < 2) {
+  for (const [name, sites] of declared) {
+    const namespaces = new Set(sites.map((site) => site.namespace)).size;
+    if (namespaces < 2) {
       continue;
     }
-    for (const entry of bucket) {
-      results.push([entry.fileId, {
-        range: pointRange(entry.line, entry.column, entry.length),
+    for (const site of sites) {
+      results.push([site.fileId, {
+        range: spanRange(site.line, site.column, name.length),
         severity: DiagnosticSeverity.Error,
         source,
         code: "name-collision" /* NameCollision */,
-        message: `Event "${name}" is declared in ${namespaces.size} services; emits cannot be resolved unambiguously`
+        message: `Event "${name}" is declared in ${namespaces} services; emits cannot be resolved unambiguously`
       }]);
     }
   }
   return results;
 }
-function referenceRange(dropped) {
-  if (isSelfRef(dropped.fullName)) {
-    return pointRange(dropped.location.line, dropped.location.column, selfMethod(dropped.fullName).length);
-  }
-  return pointRange(dropped.location.line, dropped.location.column + 1, dropped.fullName.length);
+
+// src/lsp/uri.ts
+import { fileURLToPath, pathToFileURL } from "node:url";
+function uriToPath(uri) {
+  return uri.startsWith("file:") ? fileURLToPath(uri) : uri;
 }
-function displayName(fullName) {
-  return isSelfRef(fullName) ? `this.${selfMethod(fullName)}` : fullName;
-}
-function pointRange(line2, column2, length) {
-  return {
-    start: { line: line2, character: column2 },
-    end: { line: line2, character: column2 + Math.max(length, 1) }
-  };
-}
-function zeroRange() {
-  return { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
+function pathToUri(filePath) {
+  return pathToFileURL(filePath).toString();
 }
 
-// src/lsp/handlers.ts
+// src/lsp/diagnostics-publisher.ts
+var DiagnosticsPublisher = class {
+  constructor(sink, mode, documents) {
+    this.sink = sink;
+    this.mode = mode;
+    this.documents = documents;
+  }
+  sink;
+  mode;
+  documents;
+  moleculer = /* @__PURE__ */ new Map();
+  typescript = /* @__PURE__ */ new Map();
+  indexed = false;
+  setMoleculer(byFile) {
+    this.moleculer = byFile;
+    this.indexed = true;
+    this.publishAll();
+  }
+  setTypeScript(filePath, diagnostics) {
+    if (!this.documents.isOpen(filePath)) {
+      return;
+    }
+    this.typescript.set(filePath, diagnostics);
+    if (this.mode === "pull" /* Pull */) {
+      this.sink.refresh();
+    } else {
+      this.publishFile(filePath);
+    }
+  }
+  open(filePath) {
+    if (this.indexed && this.mode === "push" /* Push */) {
+      this.publishFile(filePath);
+    }
+  }
+  close(filePath) {
+    this.typescript.delete(filePath);
+    if (this.mode === "push" /* Push */) {
+      this.sink.publish(pathToUri(filePath), []);
+    }
+  }
+  report(filePath) {
+    return [...this.moleculer.get(filePath) ?? [], ...this.typescript.get(filePath) ?? []];
+  }
+  publishAll() {
+    if (this.mode === "pull" /* Pull */) {
+      this.sink.refresh();
+      return;
+    }
+    for (const filePath of this.documents.openPaths()) {
+      this.publishFile(filePath);
+    }
+  }
+  publishFile(filePath) {
+    this.sink.publish(pathToUri(filePath), this.report(filePath));
+  }
+};
+
+// src/lsp/documents.ts
 import fs3 from "node:fs";
-import { fileURLToPath, pathToFileURL } from "node:url";
+var Documents = class {
+  open = /* @__PURE__ */ new Map();
+  set(filePath, text) {
+    this.open.set(filePath, text);
+  }
+  delete(filePath) {
+    this.open.delete(filePath);
+  }
+  isOpen(filePath) {
+    return this.open.has(filePath);
+  }
+  openPaths() {
+    return this.open.keys();
+  }
+  text(filePath) {
+    const text = this.open.get(filePath);
+    if (text !== void 0) {
+      return text;
+    }
+    try {
+      return fs3.readFileSync(filePath, "utf8");
+    } catch {
+      return void 0;
+    }
+  }
+};
+
+// src/parser/outline.ts
+function outline(filePath, source2) {
+  const service = serviceObject(source2);
+  if (service === void 0) {
+    return void 0;
+  }
+  const groups = [...mixinGroup(service), ...blockGroups(service), ...hookGroup(service)];
+  const name = serviceNamespace(service) ?? fileStem(filePath);
+  return { name, line: line(service), column: column(service), groups };
+}
+function mixinGroup(service) {
+  const mixins = objectProperty(service, "mixins");
+  if (mixins === void 0) {
+    return [];
+  }
+  return [group("mixins", mixins, mixinNames(service).map(({ name, node }) => leaf(name, "mixin", node)))];
+}
+function blockGroups(service) {
+  return symbolBlocks.flatMap(([blockName, kind]) => {
+    const block = objectProperty(service, blockName);
+    if (block === void 0) {
+      return [];
+    }
+    return [group(blockName, block, declarationKeys(block).map(({ name, key }) => leaf(name, kind, key)))];
+  });
+}
+function hookGroup(service) {
+  const hooks = objectProperty(service, "hooks");
+  if (hooks === void 0) {
+    return [];
+  }
+  const phases = hookPhases.flatMap((phase) => {
+    const phaseValue = objectProperty(hooks, phase);
+    if (phaseValue === void 0) {
+      return [];
+    }
+    const actions = properties(phaseValue).flatMap((property) => {
+      const action = propertyKey(property);
+      return action === void 0 ? [] : [leaf(action, "hook", isNode(property.key) ? property.key : property)];
+    });
+    return [group(phase, phaseValue, actions, "hookPhase")];
+  });
+  return [group("hooks", hooks, phases)];
+}
+function group(name, source2, children2, kind = "group") {
+  return { name, kind, line: line(source2), column: column(source2), children: children2 };
+}
+function leaf(name, kind, source2) {
+  return { name, kind, line: line(source2), column: column(source2), children: [] };
+}
+function fileStem(filePath) {
+  return (filePath.split("/").pop() ?? filePath).replace(/\.js$/, "");
+}
+function serviceObject(source2) {
+  try {
+    return moleculerObject(parseSource(source2));
+  } catch {
+    return void 0;
+  }
+}
 
 // src/lsp/cursor.ts
-var reservedThisProps2 = /* @__PURE__ */ new Set([
-  "broker",
-  "logger",
-  "actions",
-  "settings",
-  "metadata",
-  "schema",
-  "Promise",
-  "name",
-  "version"
-]);
-function detect(source2, line2, character, namespace) {
+function targetAt(source2, line2, character) {
   const text = source2.split("\n")[line2];
   if (text === void 0) {
-    return unknown();
+    return void 0;
   }
-  return definitionAt(text, character, namespace) ?? stringLiteralAt(text, character, namespace) ?? thisCallAt(text, character, namespace) ?? unknown();
+  return definitionAt(text, character) ?? stringLiteralAt(text, character) ?? thisCallAt(text, character);
 }
-function stringLiteralAt(text, character, namespace) {
+function stringLiteralAt(text, character) {
   let i2 = 0;
   while (i2 < text.length) {
     const quote = text[i2];
@@ -8610,37 +8611,34 @@ function stringLiteralAt(text, character, namespace) {
       i2 += text[i2] === "\\" ? 2 : 1;
     }
     if (i2 < text.length && character > start && character <= i2) {
-      return classifyString(text.slice(start + 1, i2), character - start - 1, namespace);
+      return classifyString(text.slice(start + 1, i2), character - start - 1);
     }
     i2 += 1;
   }
   return void 0;
 }
-function classifyString(value, offset2, namespace) {
-  if (value.length === 0) {
-    return void 0;
-  }
+function classifyString(value, offset2) {
   const parts = value.split(".");
   if (parts.length < 2) {
-    return isIdentifier(value) ? { kind: "methodAccess" /* MethodAccess */, fullName: `${namespace}.${value}`, rawString: value } : void 0;
+    return isIdentifier(value) ? { kind: "text" /* Text */, value } : void 0;
   }
   let position = 0;
   for (let i2 = 0; i2 < parts.length; i2 += 1) {
     const part = parts[i2] ?? "";
     if (offset2 >= position && offset2 < position + part.length) {
-      return { kind: segmentKind(parts, i2), fullName: value, rawString: value };
+      return { kind: segmentKind(parts, i2), value };
     }
     position += part.length + 1;
   }
-  return { kind: "actionString" /* ActionString */, fullName: value, rawString: value };
+  return { kind: "text" /* Text */, value };
 }
 function segmentKind(parts, index) {
   const first = parts[0] ?? "";
   const versioned = first.length >= 2 && first[0] === "v" && isDigit(first[1] ?? "");
   const serviceIndex = versioned ? 1 : 0;
-  return index <= serviceIndex ? "serviceName" /* ServiceName */ : "actionString" /* ActionString */;
+  return index <= serviceIndex ? "serviceSegment" /* ServiceSegment */ : "text" /* Text */;
 }
-function thisCallAt(text, character, namespace) {
+function thisCallAt(text, character) {
   const marker = "this.";
   let from = 0;
   while (from < text.length) {
@@ -8657,16 +8655,16 @@ function thisCallAt(text, character, namespace) {
     const dot = raw.lastIndexOf(".");
     const method = dot < 0 ? raw : raw.slice(dot + 1);
     const holder = dot < 0 ? void 0 : raw.slice(0, dot);
-    const blocked = holder === void 0 ? reservedThisProps2.has(method) : reservedThisProps2.has(holder);
+    const blocked = holder === void 0 ? reservedThisProps.has(method) : reservedThisProps.has(holder);
     const methodStart = nameStart + text.slice(nameStart, open2).indexOf(raw) + dot + 1;
     if (isMemberChain(raw) && !blocked && character >= methodStart && character < methodStart + method.length) {
-      return { kind: "methodAccess" /* MethodAccess */, fullName: `${namespace}.${method}`, chained: holder !== void 0 };
+      return { kind: "member" /* Member */, value: method };
     }
     from = open2 + 1;
   }
   return void 0;
 }
-function definitionAt(text, character, namespace) {
+function definitionAt(text, character) {
   const indent = text.length - text.trimStart().length;
   const name = definitionName(text.trim());
   if (name === void 0) {
@@ -8676,10 +8674,7 @@ function definitionAt(text, character, namespace) {
   if (start < 0 || character < start || character >= start + name.length) {
     return void 0;
   }
-  return {
-    kind: "definitionSite" /* DefinitionSite */,
-    fullName: namespace.length === 0 ? name : `${namespace}.${name}`
-  };
+  return { kind: "declaration" /* Declaration */, value: name };
 }
 function definitionName(trimmed) {
   const colon = trimmed.indexOf(":");
@@ -8690,7 +8685,7 @@ function definitionName(trimmed) {
   }
   const head = stripAsync(trimmed.slice(0, boundary)).trim();
   const name = unquote(head);
-  if (name.length === 0 || name === "handler" || /[\s\t]/.test(name)) {
+  if (name.length === 0 || !isDeclarationKey(name) || /\s/.test(name)) {
     return void 0;
   }
   if (name.includes(".") && name === head) {
@@ -8721,246 +8716,104 @@ function isIdentifier(value) {
 function isMemberChain(value) {
   return /^[a-zA-Z_$][a-zA-Z0-9_$]*(\.[a-zA-Z_$][a-zA-Z0-9_$]*)*$/.test(value);
 }
-function unknown() {
-  return { kind: "unknown" /* Unknown */, fullName: "" };
-}
 
 // src/lsp/handlers.ts
 var Handlers = class {
-  constructor(index, scanner) {
+  constructor(index, resolution, documents) {
     this.index = index;
-    this.scanner = scanner;
+    this.resolution = resolution;
+    this.documents = documents;
   }
   index;
-  scanner;
-  documents = /* @__PURE__ */ new Map();
-  openDocument(uri, text) {
-    this.documents.set(uri, text);
-  }
-  closeDocument(uri) {
-    this.documents.delete(uri);
-  }
+  resolution;
+  documents;
   definition(params) {
-    const target = this.resolveAt(params);
-    if (target === void 0) {
-      return null;
+    const cursor = this.cursorAt(params);
+    if (cursor === void 0) {
+      return void 0;
     }
-    if (target.kind === "serviceName" /* ServiceName */ && target.symbol.fileId === 0) {
-      return this.serviceLocation(target.fullName);
+    const symbol = this.resolve(cursor);
+    if (symbol !== void 0) {
+      return this.symbolLocation(symbol);
     }
-    return this.symbolLocation(target.symbol);
+    return cursor.target.kind === "serviceSegment" /* ServiceSegment */ ? this.serviceLocation(cursor.target.value) : void 0;
   }
   references(params) {
-    const target = this.resolveAt(params);
-    if (target === void 0 || target.kind === "serviceName" /* ServiceName */ && target.symbol.fileId === 0) {
-      return [];
+    const cursor = this.cursorAt(params);
+    const symbol = cursor === void 0 ? void 0 : this.resolve(cursor);
+    if (symbol === void 0) {
+      return void 0;
     }
-    const locations = this.referencesFor(target.symbol, uriToPath(params.textDocument.uri));
+    const locations = this.resolution.references(symbol);
     if (locations.length === 0) {
-      return [];
+      return void 0;
     }
     const result = locations.map((location) => this.toLocation(location));
     if (params.context?.includeDeclaration === true) {
-      result.unshift(this.symbolLocation(target.symbol));
+      result.unshift(this.symbolLocation(symbol));
     }
     return result;
   }
   documentSymbols(params) {
     const filePath = uriToPath(params.textDocument.uri);
-    const source2 = this.sourceFor(params.textDocument.uri, filePath);
-    if (source2 === void 0) {
-      return [];
+    const source2 = this.documents.text(filePath);
+    const root = source2 === void 0 ? void 0 : outline(filePath, source2);
+    if (source2 === void 0 || root === void 0) {
+      return void 0;
     }
-    const outline = new MoleculerParser().parse(filePath, source2).outline;
-    if (outline === void 0) {
-      return [];
-    }
-    return [{
-      name: outline.name,
-      kind: SymbolKind2.Object,
-      range: range(outline.line, outline.column, source2),
-      selectionRange: selectionRange(outline.line, outline.column, outline.name.length),
-      children: outline.groups.map((group2) => this.toDocumentSymbol(group2, source2))
-    }];
+    const end = endOf(source2);
+    const node = (name, kind, line2, column2, children2) => ({
+      name,
+      kind,
+      range: { start: { line: line2, character: column2 }, end },
+      selectionRange: spanRange(line2, column2, name.length),
+      children: children2.map((child) => node(child.name, documentSymbolKind(child.kind), child.line, child.column, child.children))
+    });
+    return [node(root.name, SymbolKind2.Object, root.line, root.column, root.groups)];
   }
-  toDocumentSymbol(node2, source2) {
-    return {
-      name: node2.name,
-      kind: documentSymbolKind(node2.kind),
-      range: range(node2.line, node2.column, source2),
-      selectionRange: selectionRange(node2.line, node2.column, node2.name.length),
-      children: node2.children.map((child) => this.toDocumentSymbol(child, source2))
-    };
-  }
-  referencesFor(symbol, callerPath) {
-    const callerFileId = this.index.fileId(callerPath);
-    const locations = [...this.index.referencesTo(symbol.fullName)];
-    for (const candidate of this.index.allSymbols()) {
-      if (candidate.fullName === symbol.fullName || candidate.name !== symbol.name) {
-        continue;
-      }
-      if (!this.sharesOrigin(symbol, candidate) && !this.scanner.isRelated(callerFileId, symbol.namespace, candidate)) {
-        continue;
-      }
-      locations.push(...this.index.referencesTo(candidate.fullName));
-    }
-    return dedupe(locations);
-  }
-  sharesOrigin(symbol, candidate) {
-    return symbol.sourceFileId !== 0 && symbol.sourceFileId === candidate.sourceFileId;
-  }
-  resolveAt(params) {
+  cursorAt(params) {
     const filePath = uriToPath(params.textDocument.uri);
-    const source2 = this.sourceFor(params.textDocument.uri, filePath);
-    if (source2 === void 0) {
-      return void 0;
-    }
-    const fileId = this.index.fileId(filePath);
-    const namespace = this.scanner.namespaceOf(fileId);
-    const context = detect(source2, params.position.line, params.position.character, namespace);
-    if (context.kind === "unknown" /* Unknown */) {
-      return void 0;
-    }
-    if (context.rawString !== void 0) {
-      const event = this.findEvent(context.rawString, fileId, namespace);
-      if (event !== void 0) {
-        return { kind: context.kind, fullName: event.fullName, symbol: event };
-      }
-    }
-    const direct = this.index.lookup(context.fullName);
-    if (direct !== void 0) {
-      return { kind: context.kind, fullName: context.fullName, symbol: direct };
-    }
-    if (context.kind === "serviceName" /* ServiceName */) {
-      return { kind: context.kind, fullName: context.fullName, symbol: placeholder(context.fullName) };
-    }
-    const requireRelated = context.chained === true || context.kind === "definitionSite" /* DefinitionSite */;
-    const symbol = this.findByShortName(shortName(context.fullName), fileId, namespace, requireRelated);
-    return symbol === void 0 ? void 0 : { kind: context.kind, fullName: context.fullName, symbol };
+    const source2 = this.documents.text(filePath);
+    const { line: line2, character } = params.position;
+    const target = source2 === void 0 ? void 0 : targetAt(source2, line2, character);
+    return target === void 0 ? void 0 : { target, fileId: this.index.fileId(filePath), line: line2 };
   }
-  findEvent(name, fileId, namespace) {
-    const matches = this.index.allSymbols().filter(
-      (symbol) => symbol.kind === "event" /* Event */ && symbol.name === name
-    );
-    if (hasSingleOrigin(matches)) {
-      return matches[0];
+  resolve({ target, fileId, line: line2 }) {
+    if (target.kind === "text" /* Text */ || target.kind === "serviceSegment" /* ServiceSegment */) {
+      return this.resolution.resolveText(target.value, fileId);
     }
-    const related = matches.filter((symbol) => this.scanner.isRelated(fileId, namespace, symbol));
-    return hasSingleOrigin(related) ? related[0] : void 0;
+    if (target.kind === "declaration" /* Declaration */) {
+      return this.declaredAt(fileId, line2, target.value);
+    }
+    const resolved = this.resolution.resolve("self" /* Self */, target.value, fileId);
+    return "symbol" in resolved ? resolved.symbol : void 0;
   }
-  findByShortName(name, fileId, namespace, requireRelated) {
-    const matches = this.index.allSymbols().filter((symbol) => symbol.name === name);
-    if (matches.length <= 1 && !requireRelated) {
-      return matches[0];
-    }
-    const related = matches.filter((symbol) => this.scanner.isRelated(fileId, namespace, symbol));
-    if (related.length === 1) {
-      return related[0];
-    }
-    if (related.length > 1) {
-      return related.find((symbol) => symbol.fileId === symbol.sourceFileId) ?? related[0];
-    }
-    return void 0;
+  declaredAt(fileId, line2, name) {
+    return this.index.symbolsByFile(fileId).find((symbol) => symbol.sourceFileId === fileId && symbol.line === line2 && symbol.name === name);
   }
-  sourceFor(uri, filePath) {
-    const cached = this.documents.get(uri);
-    if (cached !== void 0) {
-      return cached;
-    }
-    try {
-      return fs3.readFileSync(filePath, "utf8");
-    } catch {
-      return void 0;
-    }
-  }
-  serviceLocation(fullName) {
-    const namespace = fullName.split(".").slice(0, -1).join(".");
-    if (namespace.length === 0) {
-      return null;
-    }
-    for (const symbol of this.index.allSymbols()) {
-      if (symbol.namespace === namespace && symbol.fileId === symbol.sourceFileId) {
-        return { uri: pathToUri(this.index.filePath(symbol.fileId)), range: zeroRange2() };
-      }
-    }
-    return null;
+  serviceLocation(value) {
+    const fileId = this.resolution.serviceFile(value.split(".").slice(0, -1).join("."));
+    return fileId === void 0 ? void 0 : { uri: pathToUri(this.index.filePath(fileId)), range: spanRange(0, 0, 0) };
   }
   symbolLocation(symbol) {
-    const fileId = originFileId(symbol);
     return {
-      uri: pathToUri(this.index.filePath(fileId)),
-      range: {
-        start: { line: symbol.line, character: symbol.column },
-        end: { line: symbol.line, character: symbol.column + symbol.name.length }
-      }
+      uri: pathToUri(this.index.filePath(symbol.sourceFileId)),
+      range: spanRange(symbol.line, symbol.column, symbol.name.length)
     };
   }
   toLocation(location) {
-    const start = { line: location.line, character: location.column };
-    return { uri: pathToUri(this.index.filePath(location.fileId)), range: { start, end: start } };
+    return { uri: pathToUri(this.index.filePath(location.fileId)), range: spanRange(location.line, location.column, location.length) };
   }
 };
-function uriToPath(uri) {
-  return uri.startsWith("file:") ? fileURLToPath(uri) : uri;
-}
-function pathToUri(filePath) {
-  return pathToFileURL(filePath).toString();
-}
 function documentSymbolKind(kind) {
   if (kind === "mixin") return SymbolKind2.Module;
   if (kind === "group" || kind === "hookPhase") return SymbolKind2.Namespace;
-  if (kind === "event" || kind === "channel") return SymbolKind2.Event;
+  if (kind === "event" /* Event */ || kind === "channel" /* Channel */) return SymbolKind2.Event;
   return SymbolKind2.Method;
 }
-function selectionRange(line2, character, length) {
-  return {
-    start: { line: line2, character },
-    end: { line: line2, character: character + length }
-  };
-}
-function range(line2, character, source2) {
-  const lastLine = source2.split("\n").length - 1;
-  return {
-    start: { line: line2, character },
-    end: { line: lastLine, character: (source2.split("\n")[lastLine] ?? "").length }
-  };
-}
-function shortName(fullName) {
-  const dot = fullName.lastIndexOf(".");
-  return dot < 0 ? fullName : fullName.slice(dot + 1);
-}
-function hasSingleOrigin(symbols) {
-  return symbols.length > 0 && new Set(symbols.map(originFileId)).size === 1;
-}
-function originFileId(symbol) {
-  return symbol.sourceFileId === 0 ? symbol.fileId : symbol.sourceFileId;
-}
-function dedupe(locations) {
-  const seen = /* @__PURE__ */ new Set();
-  return locations.filter((location) => {
-    const key = `${location.fileId}:${location.line}:${location.column}`;
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
-function zeroRange2() {
-  return { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
-}
-function placeholder(fullName) {
-  return {
-    id: 0,
-    name: shortName(fullName),
-    fullName,
-    namespace: "",
-    kind: "action" /* Action */,
-    fileId: 0,
-    sourceFileId: 0,
-    line: 0,
-    column: 0
-  };
+function endOf(source2) {
+  const lines = source2.split("\n");
+  return { line: lines.length - 1, character: (lines[lines.length - 1] ?? "").length };
 }
 
 // src/lsp/transport.ts
@@ -9045,284 +8898,409 @@ function contentLength(header) {
 }
 
 // src/lsp/typescript-bridge.ts
-import { execFileSync, spawn } from "node:child_process";
-import { createRequire as createModuleRequire } from "node:module";
-import fs4 from "node:fs";
+import { spawn } from "node:child_process";
 import path3 from "node:path";
-import { fileURLToPath as fileURLToPath2, pathToFileURL as pathToFileURL2 } from "node:url";
-
-// src/log.ts
-function log(message) {
-  process.stderr.write(`[moleculer-lsp] ${message}
-`);
-}
-
-// src/lsp/typescript-bridge.ts
+var TypeScriptBridgeError = class extends Error {
+  constructor(message, code = ErrorCodes.InternalError) {
+    super(message);
+    this.code = code;
+  }
+  code;
+};
 var requestTimeoutMs = 15e3;
-var maxConsecutiveTimeouts = 2;
-function resolveTypeScriptCommand(rootPath, searchPath = process.env.PATH ?? "", bundled = bundledTypeScript) {
-  const tsc = findExecutable("tsc", rootPath, searchPath);
-  if (tsc !== void 0 && speaksLsp(tsc)) {
-    return { command: tsc, args: ["--lsp", "--stdio"] };
-  }
-  const server = findExecutable("typescript-language-server", rootPath, searchPath);
-  return server === void 0 ? bundled() : { command: server, args: ["--stdio"] };
-}
-function bundledTypeScript() {
-  try {
-    const manifestPath = createModuleRequire(import.meta.url).resolve("typescript/package.json");
-    const manifest = JSON.parse(fs4.readFileSync(manifestPath, "utf8"));
-    if (typeof manifest.version !== "string" || Number(manifest.version.split(".")[0]) < 7) {
-      return void 0;
-    }
-    return { command: process.execPath, args: [path3.join(path3.dirname(manifestPath), "bin", "tsc"), "--lsp", "--stdio"] };
-  } catch {
-    return void 0;
-  }
-}
 var TypeScriptBridge = class {
-  constructor(command, rootPath, onDiagnostics) {
+  constructor(command, rootPath, documents, onDiagnostics) {
     this.command = command;
     this.rootPath = rootPath;
+    this.documents = documents;
     this.onDiagnostics = onDiagnostics;
   }
   command;
   rootPath;
+  documents;
   onDiagnostics;
   transport;
   child;
   ready;
+  failure;
+  initialized = false;
+  stopping = false;
   pending = /* @__PURE__ */ new Map();
-  texts = /* @__PURE__ */ new Map();
-  versions = /* @__PURE__ */ new Map();
+  synced = /* @__PURE__ */ new Map();
   nextId = 1;
-  consecutiveTimeouts = 0;
   pullDiagnostics = false;
-  track(uri, text) {
-    if (this.texts.get(uri) === text) {
-      return;
+  synchronizing = Promise.resolve();
+  watchers = /* @__PURE__ */ new Map();
+  watchTargets = /* @__PURE__ */ new Map();
+  refreshTimer;
+  refreshing = false;
+  nextDocumentVersion = 1;
+  async opened(uri) {
+    this.changed(uri);
+    if (this.onDiagnostics !== void 0 || this.ready !== void 0) {
+      await this.start();
+      await this.synchronize(uri, true);
     }
-    this.texts.set(uri, text);
-    const version2 = this.versions.get(uri);
-    if (version2 === void 0 || this.transport === void 0) {
-      return;
-    }
-    this.versions.set(uri, version2 + 1);
-    this.transport.writeNotification("textDocument/didChange", {
-      textDocument: { uri, version: version2 + 1 },
-      contentChanges: [{ text }]
-    });
-    this.pullFor(uri);
   }
-  forget(uri) {
-    this.texts.delete(uri);
-    this.close(uri);
-  }
-  async show(uri) {
-    if (await this.start()) {
-      this.open(uri);
-      this.pullFor(uri);
+  changed(uri) {
+    if (this.synced.has(uri) && this.transport !== void 0) {
+      void this.synchronize(uri, true).catch((error) => log(errorMessage(error)));
     }
   }
   async request(method, params, uri) {
-    if (!await this.start()) {
-      return null;
-    }
-    const target = uri ?? this.texts.keys().next().value;
+    await this.start();
+    const target = uri ?? this.anyOpenUri();
     if (target === void 0) {
+      await this.synchronizing;
       return this.send(method, withoutProgressTokens(params));
     }
-    const temporary = !this.texts.has(target);
-    this.open(target);
-    const result = await this.send(method, withoutProgressTokens(params));
-    if (temporary && !this.texts.has(target)) {
-      this.close(target);
+    const temporary = !this.documents.isOpen(uriToPath(target));
+    try {
+      if (!await this.synchronize(target, false)) {
+        throw new TypeScriptBridgeError(`tsrs cannot read ${target}; open the document or check that the file exists.`);
+      }
+      return await this.send(method, withoutProgressTokens(params));
+    } finally {
+      if (temporary && !this.documents.isOpen(uriToPath(target))) {
+        this.closed(target);
+      }
     }
-    return result;
   }
   stop() {
-    this.shutdown(void 0);
+    if (this.stopping) return;
+    this.stopping = true;
+    const transport = this.transport;
+    if (!this.initialized || transport === void 0) {
+      this.shutdown();
+      return;
+    }
+    void this.send("shutdown", void 0).then(
+      () => transport.writeNotification("exit", void 0),
+      (error) => log(errorMessage(error))
+    ).finally(() => this.shutdown());
   }
   start() {
-    if (this.ready === void 0) {
-      this.ready = this.launch();
+    if (this.stopping || this.failure !== void 0) {
+      return Promise.reject(this.failure ?? new TypeScriptBridgeError("tsrs bridge is stopped."));
     }
+    this.ready ??= this.launch();
     return this.ready;
   }
   async launch() {
-    let child;
     try {
-      child = spawn(this.command.command, this.command.args, {
+      const command = this.command();
+      const env = { ...process.env };
+      delete env.TSRS_FAST;
+      delete env.TSRS_BINARY;
+      const child = spawn(command.command, command.args, {
         cwd: this.rootPath,
-        stdio: ["pipe", "pipe", "ignore"]
+        stdio: ["pipe", "pipe", "pipe"],
+        env
       });
-    } catch (error) {
-      log(`typescript fallback stopped: cannot start ${this.command.command}: ${messageOf(error)}`);
-      this.ready = Promise.resolve(false);
-      return false;
-    }
-    child.on("error", (error) => this.shutdown(`process error: ${error.message}`));
-    child.on("exit", (code, signal) => this.shutdown(`process exited (${code ?? signal})`));
-    child.stdin?.on("error", (error) => this.shutdown(`input closed: ${error.message}`));
-    if (child.stdin === null || child.stdout === null) {
-      this.shutdown("process has no stdio pipes");
-      return false;
-    }
-    this.child = child;
-    this.transport = new Transport(child.stdout, child.stdin);
-    void this.listen(this.transport);
-    const result = await this.send("initialize", {
-      processId: process.pid,
-      rootUri: pathToFileURL2(this.rootPath).toString(),
-      capabilities: { textDocument: { publishDiagnostics: {}, diagnostic: {} } }
-    });
-    if (result === null || this.transport === void 0) {
-      this.shutdown("initialize failed");
-      return false;
-    }
-    this.pullDiagnostics = isRecord(result) && isRecord(result.capabilities) && result.capabilities.diagnosticProvider !== void 0;
-    this.transport.writeNotification("initialized", {});
-    return true;
-  }
-  pullFor(uri) {
-    if (this.onDiagnostics === void 0 || !this.pullDiagnostics) {
-      return;
-    }
-    const onDiagnostics = this.onDiagnostics;
-    void this.send("textDocument/diagnostic", { textDocument: { uri } }).then((report) => {
-      if (isRecord(report) && Array.isArray(report.items)) {
-        onDiagnostics(uri, report.items);
+      let stderr = "";
+      child.stderr.on("data", (chunk) => {
+        stderr = (stderr + chunk.toString("utf8")).slice(-8192);
+      });
+      child.on("error", (error) => this.shutdown(`cannot launch bundled tsrs: ${error.message}`));
+      child.on("exit", (code, signal) => this.shutdown(`process exited (${code ?? signal})${stderr.trim() === "" ? "" : `: ${stderr.trim()}`}`));
+      child.stdin.on("error", (error) => this.shutdown(`input closed: ${error.message}`));
+      this.child = child;
+      this.transport = new Transport(child.stdout, child.stdin);
+      void this.listen(this.transport);
+      const result = await this.send("initialize", {
+        processId: process.pid,
+        rootUri: pathToUri(this.rootPath),
+        capabilities: {
+          // tsrs has a recursive native watcher on macOS; other platforms need client watchers.
+          workspace: { didChangeWatchedFiles: { dynamicRegistration: process.platform !== "darwin", relativePatternSupport: true }, diagnostics: { refreshSupport: this.onDiagnostics !== void 0 } },
+          ...this.onDiagnostics === void 0 ? {} : { textDocument: { publishDiagnostics: {}, diagnostic: {} } }
+        }
+      });
+      if (!isRecord(result) || !isRecord(result.capabilities) || this.transport === void 0) {
+        throw new TypeScriptBridgeError("tsrs returned an invalid initialize result.");
       }
-    });
+      this.pullDiagnostics = result.capabilities.diagnosticProvider !== void 0 && result.capabilities.diagnosticProvider !== false;
+      this.transport.writeNotification("initialized", {});
+      this.initialized = true;
+      for (const filePath of this.documents.openPaths()) {
+        await this.synchronize(pathToUri(filePath), true);
+      }
+    } catch (error) {
+      if (error instanceof TypeScriptBridgeError) this.failure ??= error;
+      this.shutdown(errorMessage(error));
+      throw this.failure;
+    }
+  }
+  async pullFor(uri) {
+    if (this.onDiagnostics === void 0 || !this.pullDiagnostics) return;
+    const version2 = this.synced.get(uri)?.version;
+    const report = await this.send("textDocument/diagnostic", { textDocument: { uri } });
+    if (version2 !== void 0 && this.synced.get(uri)?.version === version2 && this.documents.isOpen(uriToPath(uri)) && isRecord(report) && Array.isArray(report.items)) {
+      this.onDiagnostics(uri, report.items);
+    }
+  }
+  refreshDiagnostics() {
+    if (this.onDiagnostics === void 0 || this.refreshing || this.refreshTimer !== void 0) return;
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = void 0;
+      this.refreshing = true;
+      void Promise.all([...this.documents.openPaths()].map((filePath) => this.pullFor(pathToUri(filePath)))).catch((error) => log(errorMessage(error))).finally(() => {
+        this.refreshing = false;
+      });
+    }, 50);
+    this.refreshTimer.unref();
   }
   shutdown(reason) {
+    if (this.failure === void 0) {
+      this.failure = new TypeScriptBridgeError(reason === void 0 ? "tsrs bridge is stopped." : `Bundled tsrs failed: ${reason}. Check the workspace configuration; if tsrs cannot start, reinstall moleculer-lsp with optional dependencies enabled.`);
+    }
     const child = this.child;
-    const active = child !== void 0 || this.transport !== void 0;
     this.transport = void 0;
     this.child = void 0;
-    this.ready = Promise.resolve(false);
-    this.versions.clear();
-    for (const [id, pending] of this.pending) {
+    this.synced.clear();
+    clearTimeout(this.refreshTimer);
+    this.refreshTimer = void 0;
+    for (const target of this.watchTargets.values()) void target.watcher.close();
+    this.watchTargets.clear();
+    this.watchers.clear();
+    for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
-      pending.resolve(null);
-      this.pending.delete(id);
+      pending.reject(this.failure);
     }
+    this.pending.clear();
     if (child !== void 0) {
-      child.stdin?.destroy();
+      child.stdin.destroy();
       child.kill();
     }
-    if (active && reason !== void 0) {
-      log(`typescript fallback stopped: ${reason}`);
-    }
+    if (reason !== void 0 && child !== void 0 && !this.stopping) log(this.failure.message);
   }
   send(method, params) {
     const transport = this.transport;
-    if (transport === void 0) {
-      return Promise.resolve(null);
-    }
+    if (transport === void 0) return Promise.reject(this.failure ?? new TypeScriptBridgeError("tsrs is not running."));
     const id = this.nextId++;
-    return new Promise((resolve3) => {
+    return new Promise((resolve3, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        resolve3(null);
-        this.consecutiveTimeouts += 1;
-        if (this.consecutiveTimeouts >= maxConsecutiveTimeouts) {
-          this.shutdown(`${this.consecutiveTimeouts} requests timed out after ${requestTimeoutMs} ms`);
-        }
+        reject(new TypeScriptBridgeError(`tsrs ${method} timed out after ${requestTimeoutMs} ms.`));
       }, requestTimeoutMs);
       timer.unref();
-      this.pending.set(id, { resolve: resolve3, timer });
+      this.pending.set(id, { resolve: resolve3, reject, timer });
       transport.writeRequest(id, method, params);
     });
   }
   async listen(transport) {
-    while (this.transport === transport) {
-      let body;
-      try {
-        body = await transport.read();
-      } catch (error) {
-        this.shutdown(`malformed message: ${messageOf(error)}`);
-        return;
-      }
-      if (body === void 0) {
-        this.shutdown("output closed");
-        return;
-      }
-      let message;
-      try {
-        message = JSON.parse(body.toString("utf8"));
-      } catch {
-        continue;
-      }
-      if (isRecord(message)) {
+    try {
+      while (this.transport === transport) {
+        const body = await transport.read();
+        if (this.transport !== transport) return;
+        if (body === void 0) {
+          this.shutdown("output closed");
+          return;
+        }
+        const message = JSON.parse(body.toString("utf8"));
+        if (!isRecord(message)) throw new Error("invalid JSON-RPC message");
         this.receive(transport, message);
       }
+    } catch (error) {
+      if (this.transport === transport) this.shutdown(`malformed message: ${errorMessage(error)}`);
     }
   }
   receive(transport, message) {
     if (typeof message.method === "string") {
       if (message.id !== void 0) {
-        transport.writeResult(message.id, replyFor(message.method, message.params));
+        if (message.method === "workspace/configuration" && isRecord(message.params) && Array.isArray(message.params.items)) {
+          transport.writeResult(message.id, message.params.items.map(() => null));
+        } else if (message.method === "workspace/workspaceFolders") {
+          transport.writeResult(message.id, [{ uri: pathToUri(this.rootPath), name: path3.basename(this.rootPath) }]);
+        } else if (message.method === "client/registerCapability") {
+          void this.registerWatchers(message.params).then(
+            () => transport.writeResult(message.id, null),
+            (error) => {
+              transport.writeError(message.id, error instanceof TypeScriptBridgeError ? error.code : ErrorCodes.InternalError, errorMessage(error));
+              if (!(error instanceof TypeScriptBridgeError)) this.shutdown(`cannot watch tsrs project files: ${errorMessage(error)}`);
+            }
+          );
+        } else if (message.method === "client/unregisterCapability") {
+          this.unregisterWatchers(message.params);
+          transport.writeResult(message.id, null);
+        } else if (message.method === "workspace/diagnostic/refresh") {
+          transport.writeResult(message.id, null);
+          this.refreshDiagnostics();
+        } else if (message.method === "window/workDoneProgress/create") {
+          transport.writeResult(message.id, null);
+        } else {
+          transport.writeError(message.id, ErrorCodes.MethodNotFound, `unsupported tsrs client request: ${message.method}`);
+        }
       } else if (message.method === "textDocument/publishDiagnostics") {
         this.forwardDiagnostics(message.params);
       }
       return;
     }
-    if (typeof message.id !== "number") {
-      return;
-    }
+    if (typeof message.id !== "number") return;
     const pending = this.pending.get(message.id);
-    if (pending === void 0) {
-      return;
-    }
+    if (pending === void 0) return;
     this.pending.delete(message.id);
-    this.consecutiveTimeouts = 0;
     clearTimeout(pending.timer);
-    pending.resolve(message.error === void 0 ? message.result ?? null : null);
+    if (message.error !== void 0) {
+      const error = isRecord(message.error) ? message.error : {};
+      pending.reject(new TypeScriptBridgeError(`tsrs: ${typeof error.message === "string" ? error.message : "invalid child error"}`, typeof error.code === "number" ? error.code : ErrorCodes.InternalError));
+    } else if ("result" in message) {
+      pending.resolve(message.result);
+    } else {
+      pending.reject(new TypeScriptBridgeError("tsrs response is missing both result and error."));
+    }
+  }
+  get error() {
+    return this.failure;
+  }
+  async registerWatchers(params) {
+    if (!isRecord(params) || !Array.isArray(params.registrations)) {
+      throw new TypeScriptBridgeError("invalid watcher registrations", ErrorCodes.InvalidParams);
+    }
+    const ids = /* @__PURE__ */ new Set();
+    const registrations = params.registrations.map((registration) => {
+      if (!isRecord(registration) || registration.method !== "workspace/didChangeWatchedFiles") {
+        throw new TypeScriptBridgeError("unsupported tsrs capability registration", ErrorCodes.MethodNotFound);
+      }
+      if (typeof registration.id !== "string" || !isRecord(registration.registerOptions) || !Array.isArray(registration.registerOptions.watchers)) {
+        throw new TypeScriptBridgeError("invalid tsrs watcher registration", ErrorCodes.InvalidParams);
+      }
+      const id = registration.id;
+      if (this.watchers.has(id) || ids.has(id)) throw new TypeScriptBridgeError(`duplicate tsrs watcher registration: ${id}`, ErrorCodes.InvalidParams);
+      ids.add(id);
+      const targets = registration.registerOptions.watchers.map((options) => {
+        if (!isRecord(options)) throw new TypeScriptBridgeError("invalid tsrs watcher", ErrorCodes.InvalidParams);
+        return { ...watchTarget(options.globPattern, this.rootPath), kind: typeof options.kind === "number" ? options.kind : 7 };
+      });
+      return { id, targets };
+    });
+    for (const { id, targets } of registrations) {
+      const watchers = [];
+      this.watchers.set(id, watchers);
+      for (const { root, depth, kind } of targets) {
+        const key = `${depth ?? "recursive"}:${path3.resolve(root)}`;
+        const target = this.watchTargets.get(key) ?? this.createWatcher(root, depth, key);
+        target.kinds.set(id, (target.kinds.get(id) ?? 0) | kind);
+        watchers.push(target);
+      }
+      await Promise.all(watchers.map((target) => target.ready));
+    }
+  }
+  createWatcher(root, depth, key) {
+    const watcher = watch(root, {
+      ignoreInitial: true,
+      ignored: (filePath) => /(^|[/\\])\.git([/\\]|$)/.test(filePath),
+      ...depth === void 0 ? {} : { depth }
+    });
+    const ready = new Promise((resolve3, reject) => {
+      watcher.once("ready", resolve3);
+      watcher.once("error", reject);
+    });
+    const target = { watcher, ready, kinds: /* @__PURE__ */ new Map(), key };
+    this.watchTargets.set(key, target);
+    const forward = (filePath, type, mask) => {
+      if (this.stopping || this.watchTargets.get(key) !== target) return;
+      for (const kind of target.kinds.values()) {
+        if ((kind & mask) === 0) continue;
+        this.transport?.writeNotification("workspace/didChangeWatchedFiles", { changes: [{ uri: pathToUri(filePath), type }] });
+        return;
+      }
+    };
+    watcher.on("add", (filePath) => forward(filePath, 1, 1));
+    watcher.on("change", (filePath) => forward(filePath, 2, 2));
+    watcher.on("unlink", (filePath) => forward(filePath, 3, 4));
+    watcher.on("addDir", (filePath) => forward(filePath, 1, 1));
+    watcher.on("unlinkDir", (filePath) => forward(filePath, 3, 4));
+    watcher.on("error", (error) => this.shutdown(`file watcher failed: ${errorMessage(error)}`));
+    return target;
+  }
+  unregisterWatchers(params) {
+    if (!isRecord(params)) return;
+    const registrations = params.unregisterations ?? params.unregistrations;
+    if (!Array.isArray(registrations)) return;
+    for (const registration of registrations) {
+      if (!isRecord(registration) || typeof registration.id !== "string") continue;
+      for (const target of this.watchers.get(registration.id) ?? []) {
+        target.kinds.delete(registration.id);
+        if (target.kinds.size === 0) {
+          this.watchTargets.delete(target.key);
+          void target.watcher.close();
+        }
+      }
+      this.watchers.delete(registration.id);
+    }
   }
   forwardDiagnostics(params) {
-    if (this.onDiagnostics !== void 0 && isRecord(params) && typeof params.uri === "string" && Array.isArray(params.diagnostics)) {
-      this.onDiagnostics(params.uri, params.diagnostics);
-    }
+    if (this.onDiagnostics === void 0 || !isRecord(params) || typeof params.uri !== "string" || !Array.isArray(params.diagnostics) || !this.documents.isOpen(uriToPath(params.uri))) return;
+    const synced = this.synced.get(params.uri);
+    if (synced === void 0 || typeof params.version === "number" && params.version !== synced.version) return;
+    this.onDiagnostics(params.uri, params.diagnostics);
   }
-  open(uri) {
-    if (this.versions.has(uri) || this.transport === void 0) {
-      return;
-    }
-    const text = this.texts.get(uri) ?? readText(uri);
-    if (text === void 0) {
-      return;
-    }
-    this.versions.set(uri, 1);
-    this.transport.writeNotification("textDocument/didOpen", {
-      textDocument: { uri, languageId: languageIdFor(uri), version: 1, text }
+  synchronize(uri, requireOpen) {
+    const result = this.synchronizing.then(() => {
+      if (this.failure !== void 0) throw this.failure;
+      if (requireOpen && !this.documents.isOpen(uriToPath(uri))) return false;
+      const text = this.documents.text(uriToPath(uri));
+      if (text === void 0 || this.transport === void 0) return false;
+      this.writeDocument(uri, text);
+      return true;
     });
+    this.synchronizing = result.then(() => void 0, () => void 0);
+    return result;
   }
-  close(uri) {
-    if (this.versions.delete(uri) && this.transport !== void 0) {
+  writeDocument(uri, text) {
+    const synced = this.synced.get(uri);
+    if (synced === void 0) {
+      const version2 = this.nextDocumentVersion++;
+      this.synced.set(uri, { version: version2, text });
+      this.transport?.writeNotification("textDocument/didOpen", {
+        textDocument: { uri, languageId: languageIdFor(uri), version: version2, text }
+      });
+    } else if (synced.text !== text) {
+      synced.version = this.nextDocumentVersion++;
+      synced.text = text;
+      this.transport?.writeNotification("textDocument/didChange", {
+        textDocument: { uri, version: synced.version },
+        contentChanges: [{ text }]
+      });
+    } else {
+      return;
+    }
+    if (this.documents.isOpen(uriToPath(uri))) {
+      void this.pullFor(uri).catch((error) => log(errorMessage(error)));
+    }
+  }
+  closed(uri) {
+    if (this.synced.delete(uri) && this.transport !== void 0) {
       this.transport.writeNotification("textDocument/didClose", { textDocument: { uri } });
     }
   }
+  anyOpenUri() {
+    const filePath = this.documents.openPaths().next().value;
+    return filePath === void 0 ? void 0 : pathToUri(filePath);
+  }
 };
 function withoutProgressTokens(params) {
-  if (!isRecord(params)) {
-    return params;
-  }
+  if (!isRecord(params)) return params;
   const { workDoneToken, partialResultToken, ...rest } = params;
   return rest;
 }
-function replyFor(method, params) {
-  if (method === "workspace/configuration" && isRecord(params) && Array.isArray(params.items)) {
-    return params.items.map(() => null);
+function watchTarget(glob, rootPath) {
+  let pattern;
+  if (typeof glob === "string") {
+    pattern = path3.resolve(rootPath, glob);
+  } else if (isRecord(glob) && typeof glob.pattern === "string") {
+    const base = typeof glob.baseUri === "string" ? glob.baseUri : isRecord(glob.baseUri) ? glob.baseUri.uri : void 0;
+    if (typeof base !== "string") throw new TypeScriptBridgeError("invalid tsrs watcher base URI", ErrorCodes.InvalidParams);
+    pattern = path3.resolve(uriToPath(base), glob.pattern);
+  } else {
+    throw new TypeScriptBridgeError("invalid tsrs watcher glob", ErrorCodes.InvalidParams);
   }
-  return null;
-}
-function readText(uri) {
-  try {
-    return fs4.readFileSync(fileURLToPath2(uri), "utf8");
-  } catch {
-    return void 0;
-  }
+  const normalized = pattern.replaceAll("\\", "/");
+  if (normalized.endsWith("/**/*") && !/[*?{[]/.test(normalized.slice(0, -5))) return { root: pattern.slice(0, -4) };
+  if (normalized.endsWith("/*") && !/[*?{[]/.test(normalized.slice(0, -2))) return { root: pattern.slice(0, -1), depth: 0 };
+  if (/[*?{[]/.test(normalized)) throw new TypeScriptBridgeError(`unsupported tsrs watcher glob: ${normalized}`, ErrorCodes.InvalidParams);
+  return { root: pattern, depth: 0 };
 }
 function languageIdFor(uri) {
   const extension = path3.extname(uri).toLowerCase();
@@ -9331,144 +9309,51 @@ function languageIdFor(uri) {
   if (extension === ".jsx") return "javascriptreact";
   return "javascript";
 }
-function messageOf(error) {
-  return error instanceof Error ? error.message : String(error);
-}
-function findExecutable(name, rootPath, searchPath) {
-  const directories = [path3.join(rootPath, "node_modules", ".bin"), ...searchPath.split(path3.delimiter)];
-  for (const directory of directories) {
-    if (!path3.isAbsolute(directory)) {
-      continue;
-    }
-    const candidate = path3.join(directory, name);
-    try {
-      fs4.accessSync(candidate, fs4.constants.X_OK);
-      return candidate;
-    } catch {
-      continue;
-    }
-  }
-  return void 0;
-}
-function speaksLsp(tscPath) {
-  try {
-    const output = execFileSync(tscPath, ["--version"], {
-      encoding: "utf8",
-      timeout: 5e3,
-      stdio: ["ignore", "pipe", "ignore"]
-    });
-    const major = /Version (\d+)\./.exec(output)?.[1];
-    if (major !== void 0) {
-      return Number(major) >= 7;
-    }
-  } catch {
-    return shipsWithoutTsserver(tscPath);
-  }
-  return shipsWithoutTsserver(tscPath);
-}
-function shipsWithoutTsserver(tscPath) {
-  let packageDir;
-  try {
-    packageDir = path3.resolve(path3.dirname(fs4.realpathSync(tscPath)), "..");
-  } catch {
-    return false;
-  }
-  return fs4.existsSync(path3.join(packageDir, "package.json")) && !fs4.existsSync(path3.join(packageDir, "lib", "tsserver.js"));
-}
-
-// package.json
-var package_default = {
-  name: "moleculer-lsp",
-  version: "0.3.0",
-  description: "Language server for Moleculer.js: go to definition, find references, document symbols and diagnostics across services, mixins and events",
-  keywords: [
-    "moleculer",
-    "moleculerjs",
-    "lsp",
-    "language-server",
-    "microservices",
-    "javascript"
-  ],
-  homepage: "https://github.com/Anshuman115/moleculer-lsp#readme",
-  bugs: {
-    url: "https://github.com/Anshuman115/moleculer-lsp/issues"
-  },
-  repository: {
-    type: "git",
-    url: "git+https://github.com/Anshuman115/moleculer-lsp.git"
-  },
-  license: "Apache-2.0",
-  author: "Anshuman Tripathy",
-  type: "module",
-  main: "dist/main.js",
-  bin: {
-    "moleculer-lsp": "dist/main.js"
-  },
-  files: [
-    "dist",
-    "CHANGELOG.md"
-  ],
-  engines: {
-    node: ">=18"
-  },
-  scripts: {
-    build: "tsc --noEmit && npm run bundle",
-    bundle: `esbuild src/main.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/main.js --banner:js="import{createRequire}from'node:module';const require=createRequire(import.meta.url);"`,
-    typecheck: "tsc --noEmit",
-    test: "vitest run src",
-    dev: "tsx src/main.ts",
-    prepublishOnly: "npm run build && npm test",
-    bench: "node scripts/benchmark.mjs"
-  },
-  devDependencies: {
-    "@types/node": "^22.10.2",
-    acorn: "^8.16.0",
-    chokidar: "^4.0.3",
-    esbuild: "^0.28.1",
-    tsx: "^4.19.2",
-    vitest: "^2.1.8"
-  },
-  dependencies: {
-    typescript: "^7.0.2"
-  }
-};
-
-// src/version.ts
-var VERSION = package_default.version;
 
 // src/lsp/server.ts
-var passThroughMethods = /* @__PURE__ */ new Set([
-  "textDocument/hover",
-  "textDocument/implementation",
-  "textDocument/prepareCallHierarchy",
-  "callHierarchy/incomingCalls",
-  "callHierarchy/outgoingCalls",
-  "workspace/symbol"
-]);
+var indexMethods = {
+  "textDocument/definition": {
+    capability: "definitionProvider",
+    empty: null,
+    query: (params) => {
+      const parsed = positionParams(params);
+      return parsed && { uri: parsed.textDocument.uri, answer: (handlers) => handlers.definition(parsed) };
+    }
+  },
+  "textDocument/references": {
+    capability: "referencesProvider",
+    empty: [],
+    query: (params) => {
+      const parsed = referenceParams(params);
+      return parsed && { uri: parsed.textDocument.uri, answer: (handlers) => handlers.references(parsed) };
+    }
+  },
+  "textDocument/documentSymbol": {
+    capability: "documentSymbolProvider",
+    empty: [],
+    query: (params) => {
+      const parsed = documentSymbolParams(params);
+      return parsed && { uri: parsed.textDocument.uri, answer: (handlers) => handlers.documentSymbols(parsed) };
+    }
+  }
+};
+var typescriptMethods = {
+  "textDocument/hover": "hoverProvider",
+  "textDocument/implementation": "implementationProvider",
+  "textDocument/prepareCallHierarchy": "callHierarchyProvider",
+  "callHierarchy/incomingCalls": "callHierarchyProvider",
+  "callHierarchy/outgoingCalls": "callHierarchyProvider",
+  "workspace/symbol": "workspaceSymbolProvider"
+};
 var Server = class {
   constructor(readable, writable, options = {}) {
     this.options = options;
     this.transport = new Transport(readable, writable);
-    this.watcher = new Watcher(() => this.rescan());
   }
   options;
-  index = new Index();
-  scanner = new Scanner(this.index);
-  handlers = new Handlers(this.index, this.scanner);
-  watcher;
   transport;
-  queued = [];
-  openFiles = /* @__PURE__ */ new Set();
-  moleculerDiagnostics = /* @__PURE__ */ new Map();
-  typescriptDiagnostics = /* @__PURE__ */ new Map();
-  rootPath = process.cwd();
-  moleculerWorkspace = false;
-  scanState = "pending" /* Pending */;
-  scanError = "";
-  pullDiagnostics = false;
-  refreshSupport = false;
+  session;
   nextServerRequestId = 1;
-  bridge;
   async run() {
     while (true) {
       let body;
@@ -9483,14 +9368,16 @@ var Server = class {
         throw error;
       }
       if (body === void 0) {
-        this.watcher.close();
-        this.bridge?.stop();
+        this.close();
         return;
       }
       let message;
       try {
         message = JSON.parse(body.toString("utf8"));
       } catch {
+        message = void 0;
+      }
+      if (!isRecord(message)) {
         this.transport.writeError(null, ErrorCodes.ParseError, "invalid JSON-RPC message");
         continue;
       }
@@ -9501,7 +9388,7 @@ var Server = class {
     try {
       this.route(message);
     } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
+      const text = errorMessage(error);
       log(`request failed: ${message.method}: ${text}`);
       if (message.id !== void 0) {
         this.transport.writeError(message.id, ErrorCodes.InternalError, text);
@@ -9512,310 +9399,214 @@ var Server = class {
     if (typeof message.method !== "string") {
       return;
     }
+    if (message.method === "initialize") {
+      this.initialize(message);
+      return;
+    }
+    if (message.method === "shutdown") {
+      this.close();
+      this.transport.writeResult(message.id, null);
+      return;
+    }
+    if (message.method === "exit") {
+      this.close();
+      process.exit(0);
+    }
+    const session = this.session;
+    if (session === void 0) {
+      if (message.id !== void 0) {
+        this.transport.writeError(message.id, ErrorCodes.ServerNotInitialized, "server not initialized");
+      }
+      return;
+    }
+    this.routeSession(session, message);
+  }
+  routeSession(session, message) {
+    const indexMethod = indexMethods[message.method];
+    if (indexMethod !== void 0) {
+      this.indexRequest(session, message, indexMethod);
+      return;
+    }
     switch (message.method) {
-      case "initialize":
-        this.initialize(message);
-        return;
       case "initialized":
-        this.startScan();
+        session.workspace.start();
         return;
-      case "shutdown":
-        this.watcher.close();
-        this.bridge?.stop();
-        this.transport.writeResult(message.id, null);
-        return;
-      case "exit":
-        this.watcher.close();
-        this.bridge?.stop();
-        process.exit(0);
       case "textDocument/didOpen":
-        this.didOpen(message.params);
+        this.didOpen(session, message.params);
         return;
       case "textDocument/didChange":
-        this.didChange(message.params);
+        this.didChange(session, message.params);
         return;
       case "textDocument/didSave":
-        this.didSave();
+        session.workspace.changed();
         return;
       case "textDocument/didClose":
-        this.didClose(message.params);
-        return;
-      case "textDocument/definition":
-      case "textDocument/references":
-        this.documentRequest(message);
-        return;
-      case "textDocument/documentSymbol":
-        this.documentSymbolRequest(message);
+        this.didClose(session, message.params);
         return;
       case "textDocument/diagnostic":
-        this.diagnosticRequest(message);
+        this.diagnosticRequest(session, message);
         return;
-      default:
-        if (passThroughMethods.has(message.method) && this.bridge !== void 0) {
-          this.passThrough(message, this.bridge);
-        } else if (message.id !== void 0) {
-          this.transport.writeError(message.id, ErrorCodes.MethodNotFound, `method not found: ${message.method}`);
-        }
+    }
+    if (typescriptMethods[message.method] !== void 0 && session.bridge !== void 0) {
+      this.passThrough(session.bridge, message);
+    } else if (message.id !== void 0) {
+      this.transport.writeError(message.id, ErrorCodes.MethodNotFound, `method not found: ${message.method}`);
     }
   }
   initialize(message) {
     const params = isRecord(message.params) ? message.params : {};
-    const rootUri = typeof params.rootUri === "string" ? params.rootUri : "";
-    if (rootUri.length > 0) {
-      this.rootPath = fileURLToPath3(rootUri);
-    } else if (Array.isArray(params.workspaceFolders)) {
-      const first = params.workspaceFolders[0];
-      if (isRecord(first) && typeof first.uri === "string") {
-        this.rootPath = fileURLToPath3(first.uri);
-      }
-    }
-    this.moleculerWorkspace = isMoleculerWorkspace(this.rootPath);
+    const rootPath = rootPathOf(params);
     const capabilities = isRecord(params.capabilities) ? params.capabilities : {};
-    const textDocument2 = isRecord(capabilities.textDocument) ? capabilities.textDocument : {};
+    const textDocument = isRecord(capabilities.textDocument) ? capabilities.textDocument : {};
     const workspace = isRecord(capabilities.workspace) ? capabilities.workspace : {};
     const workspaceDiagnostics = isRecord(workspace.diagnostics) ? workspace.diagnostics : {};
-    this.pullDiagnostics = isRecord(textDocument2.diagnostic);
-    this.refreshSupport = workspaceDiagnostics.refreshSupport === true;
-    this.bridge = this.createBridge();
+    const pullDiagnostics = isRecord(textDocument.diagnostic);
+    const mode = pullDiagnostics ? "pull" /* Pull */ : "push" /* Push */;
+    this.session = this.openSession(rootPath, mode, workspaceDiagnostics.refreshSupport === true);
     this.transport.writeResult(message.id, {
       capabilities: {
         textDocumentSync: { openClose: true, change: 1, save: true },
-        definitionProvider: true,
-        referencesProvider: true,
-        documentSymbolProvider: true,
-        ...this.pullDiagnostics ? { diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false } } : {},
-        ...this.bridge === void 0 ? {} : { hoverProvider: true, implementationProvider: true, callHierarchyProvider: true, workspaceSymbolProvider: true }
+        ...providers(Object.values(indexMethods).map((method) => method.capability)),
+        ...pullDiagnostics ? { diagnosticProvider: { interFileDependencies: true, workspaceDiagnostics: false } } : {},
+        ...this.session.bridge === void 0 ? {} : providers(Object.values(typescriptMethods))
       },
       serverInfo: { name: "moleculer-lsp", version: VERSION }
     });
   }
-  startScan() {
-    if (!this.moleculerWorkspace) {
-      log(`no moleculer.config.* or moleculer dependency at or above ${this.rootPath}; index disabled`);
-      this.scanState = "ready" /* Ready */;
-      this.flushQueued();
-      return;
-    }
-    setTimeout(() => {
-      const started = Date.now();
-      try {
-        const result = this.scanner.scan(this.rootPath);
-        this.scanState = "ready" /* Ready */;
-        this.collectDiagnostics();
-        const stats = this.index.stats();
-        log(`indexed ${stats.symbolCount} symbols in ${result.fileCount} files (${Date.now() - started}ms)`);
-        log(`references ${stats.referenceCount}, unresolved ${result.dropped.length}, mixin failures ${result.mixinFailures.length}`);
-        this.watcher.watch(this.rootPath);
-      } catch (error) {
-        this.scanState = "failed" /* Failed */;
-        this.scanError = error instanceof Error ? error.message : String(error);
-        log(`scan failed: ${this.scanError}`);
-      }
-      this.flushQueued();
-      if (this.scanState === "ready" /* Ready */) {
-        this.publishDiagnostics();
-      }
-    }, 0);
+  openSession(rootPath, mode, refreshSupport) {
+    const documents = new Documents();
+    const diagnostics = new DiagnosticsPublisher(this.diagnosticsSink(refreshSupport), mode, documents);
+    const workspace = new Workspace(rootPath, (result) => diagnostics.setMoleculer(diagnosticsByFile(workspace.index, result)));
+    const handlers = new Handlers(workspace.index, workspace.resolution, documents);
+    const bridge = this.createBridge(rootPath, documents, diagnostics);
+    return { workspace, documents, handlers, diagnostics, bridge };
   }
-  rescan() {
-    if (!this.moleculerWorkspace) {
-      return;
+  createBridge(rootPath, documents, diagnostics) {
+    if (this.options.typescript === void 0) {
+      return void 0;
     }
-    try {
-      this.scanner.scan(this.rootPath);
-      this.scanState = "ready" /* Ready */;
-      this.collectDiagnostics();
-      this.publishDiagnostics();
-    } catch (error) {
-      log(`rescan failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    log("typescript fallback: bundled tsrs (starts on demand)");
+    const onDiagnostics = this.options.typescriptDiagnostics === true ? (uri, items) => diagnostics.setTypeScript(uriToPath(uri), items) : void 0;
+    return new TypeScriptBridge(this.options.typescript, rootPath, documents, onDiagnostics);
   }
-  flushQueued() {
-    for (const message of this.queued.splice(0)) {
-      this.dispatch(message);
-    }
-  }
-  documentRequest(message) {
-    if (this.scanState === "pending" /* Pending */) {
-      this.queued.push(message);
+  indexRequest(session, message, method) {
+    const query = method.query(message.params);
+    if (query === void 0) {
+      this.transport.writeError(message.id, ErrorCodes.InvalidParams, `invalid params for ${message.method}`);
       return;
     }
-    if (this.scanState === "failed" /* Failed */) {
-      this.transport.writeError(message.id, ErrorCodes.ServerNotInitialized, `index unavailable: ${this.scanError}`);
+    const failure = session.workspace.failure;
+    if (failure !== void 0 && session.bridge === void 0) {
+      this.transport.writeError(message.id, ErrorCodes.ServerNotInitialized, `index unavailable: ${failure}`);
       return;
     }
-    const result = message.method === "textDocument/definition" ? this.handlers.definition(positionParams(message.params)) : this.handlers.references(referenceParams(message.params));
-    this.respond(message, result);
-  }
-  respond(message, result) {
-    const uri = textDocument(message.params)?.uri;
-    if (this.bridge === void 0 || uri === void 0 || !isEmpty(result)) {
-      this.transport.writeResult(message.id, result);
+    const answer = failure === void 0 && session.workspace.moleculer ? query.answer(session.handlers) : void 0;
+    if (answer !== void 0) {
+      this.transport.writeResult(message.id, answer);
       return;
     }
-    void this.bridge.request(message.method, message.params, uri).then(
-      (fallback) => this.transport.writeResult(message.id, isEmpty(fallback) ? result : fallback),
-      () => this.transport.writeResult(message.id, result)
+    if (session.bridge === void 0) {
+      this.transport.writeResult(message.id, method.empty);
+      return;
+    }
+    void session.bridge.request(message.method, message.params, query.uri).then(
+      (fallback) => this.transport.writeResult(message.id, fallback ?? method.empty),
+      (error) => this.bridgeError(message, error)
     );
   }
-  passThrough(message, bridge) {
-    const record = isRecord(message.params) ? message.params : {};
-    const item = isRecord(record.item) ? record.item : {};
-    const uri = textDocument(message.params)?.uri ?? (typeof item.uri === "string" ? item.uri : void 0);
+  passThrough(bridge, message) {
+    const params = isRecord(message.params) ? message.params : {};
+    const item = isRecord(params.item) ? params.item : {};
+    const uri = textDocumentOf(message.params)?.uri ?? (typeof item.uri === "string" ? item.uri : void 0);
     void bridge.request(message.method, message.params, uri).then(
       (result) => this.transport.writeResult(message.id, result),
-      () => this.transport.writeResult(message.id, null)
+      (error) => this.bridgeError(message, error)
     );
   }
-  createBridge() {
-    const setting = this.options.typescriptFallback;
-    if (setting === void 0 || setting === false) {
-      return void 0;
-    }
-    const command = setting === true ? resolveTypeScriptCommand(this.rootPath) : setting;
-    if (command === void 0) {
-      log("typescript fallback disabled: no tsc with --lsp or typescript-language-server found");
-      return void 0;
-    }
-    log(`typescript fallback: ${command.command} ${command.args.join(" ")}`);
-    const onDiagnostics = this.options.typescriptDiagnostics === true ? (uri, diagnostics) => this.receiveTypeScriptDiagnostics(uri, diagnostics) : void 0;
-    return new TypeScriptBridge(command, this.rootPath, onDiagnostics);
+  bridgeError(message, error) {
+    this.transport.writeError(message.id, error instanceof TypeScriptBridgeError ? error.code : ErrorCodes.InternalError, errorMessage(error));
   }
-  documentSymbolRequest(message) {
-    if (this.scanState === "pending" /* Pending */) {
-      this.queued.push(message);
-      return;
-    }
-    if (this.scanState === "failed" /* Failed */) {
-      this.transport.writeError(message.id, ErrorCodes.ServerNotInitialized, `index unavailable: ${this.scanError}`);
-      return;
-    }
-    this.respond(message, this.handlers.documentSymbols(documentSymbolParams(message.params)));
-  }
-  diagnosticRequest(message) {
-    if (this.scanState === "pending" /* Pending */) {
-      this.queued.push(message);
-      return;
-    }
-    const document = textDocument(message.params);
+  diagnosticRequest(session, message) {
+    const document = textDocumentOf(message.params);
     if (document === void 0) {
       this.transport.writeError(message.id, ErrorCodes.InvalidParams, "textDocument/diagnostic requires a document uri");
       return;
     }
-    this.transport.writeResult(message.id, { kind: "full", items: this.diagnosticsFor(uriToPath(document.uri)) });
-  }
-  didOpen(params) {
-    const document = textDocument(params);
-    if (document !== void 0 && typeof document.text === "string") {
-      this.handlers.openDocument(document.uri, document.text);
-      this.bridge?.track(document.uri, document.text);
-      this.openFiles.add(uriToPath(document.uri));
-      if (this.options.typescriptDiagnostics === true) {
-        void this.bridge?.show(document.uri);
-      }
-      if (this.scanState === "ready" /* Ready */ && !this.pullDiagnostics) {
-        this.publishFile(uriToPath(document.uri));
-      }
-    }
-  }
-  didChange(params) {
-    const record = isRecord(params) ? params : {};
-    const document = textDocument(params);
-    const changes = Array.isArray(record.contentChanges) ? record.contentChanges : [];
-    const latest = changes[changes.length - 1];
-    if (document !== void 0 && isRecord(latest) && typeof latest.text === "string") {
-      this.handlers.openDocument(document.uri, latest.text);
-      this.bridge?.track(document.uri, latest.text);
-    }
-  }
-  didSave() {
-    this.watcher.trigger();
-  }
-  didClose(params) {
-    const document = textDocument(params);
-    if (document !== void 0) {
-      this.handlers.closeDocument(document.uri);
-      this.bridge?.forget(document.uri);
-      this.closeFile(uriToPath(document.uri));
-    }
-  }
-  closeFile(filePath) {
-    this.openFiles.delete(filePath);
-    this.typescriptDiagnostics.delete(filePath);
-    if (!this.pullDiagnostics) {
-      this.transport.writeNotification("textDocument/publishDiagnostics", { uri: pathUri(filePath), diagnostics: [] });
-    }
-  }
-  collectDiagnostics() {
-    this.moleculerDiagnostics.clear();
-    for (const [fileId, diagnostics] of diagnosticsByFile(this.index, this.scanner)) {
-      this.moleculerDiagnostics.set(this.index.filePath(fileId), diagnostics);
-    }
-  }
-  receiveTypeScriptDiagnostics(uri, diagnostics) {
-    const filePath = uriToPath(uri);
-    this.typescriptDiagnostics.set(filePath, diagnostics);
-    if (this.pullDiagnostics) {
-      this.publishDiagnostics();
-    } else if (this.openFiles.has(filePath)) {
-      this.publishFile(filePath);
-    }
-  }
-  diagnosticsFor(filePath) {
-    return [...this.moleculerDiagnostics.get(filePath) ?? [], ...this.typescriptDiagnostics.get(filePath) ?? []];
-  }
-  publishFile(filePath) {
-    this.transport.writeNotification("textDocument/publishDiagnostics", { uri: pathUri(filePath), diagnostics: this.diagnosticsFor(filePath) });
-  }
-  publishDiagnostics() {
-    if (this.pullDiagnostics) {
-      if (this.refreshSupport) {
-        this.transport.writeRequest(this.nextServerRequestId++, "workspace/diagnostic/refresh", {});
-      }
+    const failure = this.options.typescriptDiagnostics === true ? session.bridge?.error : void 0;
+    if (failure !== void 0) {
+      this.bridgeError(message, failure);
       return;
     }
-    for (const filePath of this.openFiles) {
-      this.publishFile(filePath);
+    this.transport.writeResult(message.id, { kind: "full", items: session.diagnostics.report(uriToPath(document.uri)) });
+  }
+  didOpen(session, params) {
+    const document = textDocumentOf(params);
+    if (document === void 0 || typeof document.text !== "string") {
+      return;
     }
+    const filePath = uriToPath(document.uri);
+    session.documents.set(filePath, document.text);
+    void session.bridge?.opened(document.uri).catch((error) => log(errorMessage(error)));
+    session.diagnostics.open(filePath);
+  }
+  didChange(session, params) {
+    const document = textDocumentOf(params);
+    const changes = isRecord(params) && Array.isArray(params.contentChanges) ? params.contentChanges : [];
+    const latest = changes[changes.length - 1];
+    if (document !== void 0 && isRecord(latest) && typeof latest.text === "string") {
+      session.documents.set(uriToPath(document.uri), latest.text);
+      session.bridge?.changed(document.uri);
+    }
+  }
+  didClose(session, params) {
+    const document = textDocumentOf(params);
+    if (document === void 0) {
+      return;
+    }
+    const filePath = uriToPath(document.uri);
+    session.documents.delete(filePath);
+    session.bridge?.closed(document.uri);
+    session.diagnostics.close(filePath);
+  }
+  close() {
+    this.session?.workspace.close();
+    this.session?.bridge?.stop();
+  }
+  diagnosticsSink(refreshSupport) {
+    return {
+      publish: (uri, diagnostics) => this.transport.writeNotification("textDocument/publishDiagnostics", { uri, diagnostics }),
+      refresh: () => {
+        if (refreshSupport) {
+          this.transport.writeRequest(this.nextServerRequestId++, "workspace/diagnostic/refresh", {});
+        }
+      }
+    };
   }
 };
-function textDocument(params) {
-  const record = isRecord(params) ? params : {};
-  const document = isRecord(record.textDocument) ? record.textDocument : void 0;
-  if (document === void 0 || typeof document.uri !== "string") {
-    return void 0;
+function rootPathOf(params) {
+  if (typeof params.rootUri === "string" && params.rootUri.length > 0) {
+    return uriToPath(params.rootUri);
   }
-  return { uri: document.uri, text: document.text };
+  const first = Array.isArray(params.workspaceFolders) ? params.workspaceFolders[0] : void 0;
+  return isRecord(first) && typeof first.uri === "string" ? uriToPath(first.uri) : process.cwd();
 }
-function positionParams(params) {
-  const record = isRecord(params) ? params : {};
-  const document = isRecord(record.textDocument) ? record.textDocument : {};
-  const position = isRecord(record.position) ? record.position : {};
-  return {
-    textDocument: { uri: typeof document.uri === "string" ? document.uri : "" },
-    position: {
-      line: typeof position.line === "number" ? position.line : 0,
-      character: typeof position.character === "number" ? position.character : 0
-    }
-  };
+function providers(capabilities) {
+  return Object.fromEntries(capabilities.map((capability) => [capability, true]));
 }
-function referenceParams(params) {
-  const record = isRecord(params) ? params : {};
-  const context = isRecord(record.context) ? record.context : {};
-  return {
-    ...positionParams(params),
-    context: { includeDeclaration: context.includeDeclaration === true }
-  };
-}
-function documentSymbolParams(params) {
-  const document = textDocument(params);
-  return { textDocument: { uri: document?.uri ?? "" } };
-}
-function isEmpty(result) {
-  return result === null || result === void 0 || Array.isArray(result) && result.length === 0;
-}
-function pathUri(filePath) {
-  return new URL(`file://${filePath}`).toString();
+
+// src/lsp/typescript-command.ts
+import { createRequire } from "node:module";
+import fs4 from "node:fs";
+import path4 from "node:path";
+function resolveTypeScriptCommand() {
+  try {
+    const manifestPath = createRequire(import.meta.url).resolve("tsrs/package.json");
+    const binPath = path4.join(path4.dirname(manifestPath), "bin", "tsrs");
+    fs4.accessSync(binPath, fs4.constants.R_OK);
+    return { command: process.execPath, args: [binPath, "--lsp", "--stdio"] };
+  } catch (error) {
+    throw new Error(`Bundled tsrs is unavailable; reinstall moleculer-lsp with optional dependencies enabled. ${errorMessage(error)}`);
+  }
 }
 
 // src/main.ts
@@ -9824,8 +9615,8 @@ var usage = `Usage: moleculer-lsp [options]
 Options:
   --stdio                    Start the language server over stdio (default)
   --typescript-fallback      Send requests the index cannot answer, and hover, implementation,
-                             call hierarchy and workspace symbol requests, to TypeScript
-  --typescript-diagnostics   Also report TypeScript diagnostics for open files (implies --typescript-fallback)
+                             call hierarchy and workspace symbol requests, to bundled tsrs
+  --typescript-diagnostics   Also report tsrs diagnostics for open files (implies --typescript-fallback)
   --scan <dir>               Index a workspace and print a summary
   --parse <file>             Print symbols and references for one file
   --version                  Print the version
@@ -9845,7 +9636,7 @@ async function main(args) {
     return;
   }
   if (command === "--parse") {
-    parseFile(args[args.indexOf("--parse") + 1]);
+    parseFile2(args[args.indexOf("--parse") + 1]);
     return;
   }
   if (command === "--scan") {
@@ -9853,27 +9644,28 @@ async function main(args) {
     return;
   }
   const typescriptDiagnostics = args.includes(typescriptDiagnosticsFlag);
+  const typescriptFallback = typescriptDiagnostics || args.includes(typescriptFallbackFlag);
   await new Server(process.stdin, process.stdout, {
-    typescriptFallback: typescriptDiagnostics || args.includes(typescriptFallbackFlag),
+    typescript: typescriptFallback ? resolveTypeScriptCommand : void 0,
     typescriptDiagnostics
   }).run();
 }
-function parseFile(filePath) {
+function parseFile2(filePath) {
   if (filePath === void 0) {
     throw new Error("usage: moleculer-lsp --parse <file>");
   }
-  const result = new MoleculerParser().parse(filePath, fs5.readFileSync(filePath, "utf8"));
+  const result = parse4(fs5.readFileSync(filePath, "utf8"));
   process.stdout.write(`file: ${filePath}
-service: ${result.isService}
+namespace: ${result.namespace ?? "(none)"}
 `);
   process.stdout.write("symbols:\n");
-  for (const symbol of result.symbols) {
-    process.stdout.write(`  ${symbol.fullName} [${symbol.kind}] ${symbol.line + 1}:${symbol.column + 1}
+  for (const declaration2 of result.declarations) {
+    process.stdout.write(`  ${declaration2.name} [${declaration2.kind}] ${declaration2.line + 1}:${declaration2.column + 1}
 `);
   }
   process.stdout.write("references:\n");
   for (const reference of result.references) {
-    process.stdout.write(`  ${reference.fullName} [${reference.kind}] ${reference.location.line + 1}:${reference.location.column + 1}
+    process.stdout.write(`  ${reference.target} [${reference.kind}] ${reference.span.line + 1}:${reference.span.column + 1}
 `);
   }
   process.stdout.write("mixins:\n");
@@ -9889,7 +9681,7 @@ function scanWorkspace(rootPath) {
   const index = new Index();
   const scanner = new Scanner(index);
   const started = Date.now();
-  const result = scanner.scan(path4.resolve(rootPath));
+  const result = scanner.scan(collectFiles(path5.resolve(rootPath)));
   const stats = index.stats();
   process.stdout.write(`root: ${rootPath}
 `);
@@ -9915,8 +9707,7 @@ function scanWorkspace(rootPath) {
   }
 }
 main(process.argv.slice(2)).catch((error) => {
-  process.stderr.write(`[moleculer-lsp] ${error instanceof Error ? error.message : String(error)}
-`);
+  log(errorMessage(error));
   process.exit(1);
 });
 /*! Bundled license information:

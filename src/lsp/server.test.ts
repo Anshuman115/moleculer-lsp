@@ -4,6 +4,7 @@ import path from 'node:path'
 import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Server, type ServerOptions } from './server.js'
+import { resolveTypeScriptCommand } from './typescript-command.js'
 
 let root: string
 
@@ -26,7 +27,7 @@ interface Incoming {
   method?: string
   params?: unknown
   result?: unknown
-  error?: { message: string }
+  error?: { code: number; message: string }
 }
 
 class Client {
@@ -38,6 +39,7 @@ class Client {
   private readonly server: Server
   readonly finished: Promise<void>
   readonly notifications: Array<{ method: string; params: unknown }> = []
+  readonly protocolErrors: string[] = []
   private readonly notificationWaiters = new Map<string, Array<(params: unknown) => void>>()
 
   constructor(options: ServerOptions = {}) {
@@ -77,7 +79,7 @@ class Client {
     this.inbound.end()
   }
 
-  private send(payload: unknown): void {
+  send(payload: unknown): void {
     const body = Buffer.from(JSON.stringify(payload), 'utf8')
     this.inbound.write(`Content-Length: ${body.length}\r\n\r\n`)
     this.inbound.write(body)
@@ -114,6 +116,10 @@ class Client {
       }
       return
     }
+    if (message.id === null && message.error !== undefined) {
+      this.protocolErrors.push(message.error.message)
+      return
+    }
     if (typeof message.id !== 'number') {
       return
     }
@@ -123,7 +129,7 @@ class Client {
     }
     this.waiting.delete(message.id)
     if (message.error !== undefined) {
-      pending.reject(new Error(message.error.message))
+      pending.reject(Object.assign(new Error(message.error.message), { code: message.error.code }))
       return
     }
     pending.resolve(message.result)
@@ -183,9 +189,13 @@ describe('Server root marker', () => {
         textDocument: { uri: `file://${filePath}` },
         position: positionOf(ghostFixture, 'ghost.action'),
       })
+      const symbols = await client.request('textDocument/documentSymbol', {
+        textDocument: { uri: `file://${filePath}` },
+      })
 
       expect(report.items).toEqual([])
       expect(definition ?? null).toBeNull()
+      expect(symbols ?? []).toEqual([])
     } finally {
       client.stop()
     }
@@ -262,9 +272,6 @@ describe('Server pull diagnostics', () => {
       expect(report.items.map((item) => item.message)).toContainEqual(
         expect.stringContaining('"this.unknownMethod"'),
       )
-      expect(report.items.map((item) => item.message)).not.toContainEqual(
-        expect.stringContaining('#self.'),
-      )
       expect(report.items.map((item) => item.message)).toContainEqual(
         expect.stringContaining('"ghost.action"'),
       )
@@ -329,6 +336,18 @@ describe('Server pull diagnostics', () => {
 })
 
 describe('Server navigation', () => {
+  it('rejects a definition request without a position', async () => {
+    const client = new Client()
+    try {
+      await initialize(client, {})
+      await expect(client.request('textDocument/definition', { textDocument: { uri: 'file:///w/a.js' } })).rejects.toThrow(
+        /invalid params for textDocument\/definition/,
+      )
+    } finally {
+      client.stop()
+    }
+  })
+
   it('resolves an action string from the service segment to the action definition', async () => {
     const callSite = 'ctx.call("mongoprovider.getBooking", {})'
     fs.writeFileSync(path.join(root, 'mongo.service.js'), [
@@ -415,6 +434,45 @@ describe('Server navigation', () => {
   })
 })
 
+describe('Server protocol', () => {
+  it('answers a non-object JSON message with a protocol error and keeps serving', async () => {
+    const callSite = 'ctx.call("mongoprovider.getBooking", {})'
+    fs.writeFileSync(path.join(root, 'mongo.service.js'), [
+      'module.exports = {',
+      '  name: "mongoprovider",',
+      '  actions: {',
+      '    getBooking: { handler() { return null } },',
+      '  },',
+      '}',
+    ].join('\n'))
+    const callerPath = path.join(root, 'caller.service.js')
+    const callerSource = [
+      'module.exports = {',
+      '  name: "caller",',
+      '  actions: {',
+      `    run: { async handler(ctx) { return ${callSite} } },`,
+      '  },',
+      '}',
+    ].join('\n')
+    fs.writeFileSync(callerPath, callerSource)
+
+    const client = new Client()
+    try {
+      client.send(null)
+      await initialize(client, {})
+      const definition = await client.request('textDocument/definition', {
+        textDocument: { uri: `file://${callerPath}` },
+        position: positionOf(callerSource, 'getBooking'),
+      }) as { uri: string } | null
+
+      expect(client.protocolErrors).toEqual(['invalid JSON-RPC message'])
+      expect(definition?.uri.endsWith('mongo.service.js')).toBe(true)
+    } finally {
+      client.stop()
+    }
+  })
+})
+
 const stubTypeScriptServer = `
 const fs = require('node:fs')
 const [mode, pidFile] = process.argv.slice(2)
@@ -454,8 +512,18 @@ const handle = (message) => {
   }
   if (message.id === undefined) return
   const uri = message.params?.textDocument?.uri
+  if (message.method === 'shutdown') {
+    if ('params' in message) return send({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: 'shutdown params must be omitted' } })
+    fs.writeFileSync(pidFile + '.shutdown', 'ok')
+    return send({ jsonrpc: '2.0', id: message.id, result: null })
+  }
+  if (mode === 'initialize-error' && message.method === 'initialize') {
+    return send({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: 'initialize rejected' } })
+  }
   if (message.method === 'initialize') return send({ jsonrpc: '2.0', id: message.id, result: { capabilities: {} } })
   if (message.method === 'textDocument/definition') {
+    if (mode === 'request-error') return send({ jsonrpc: '2.0', id: message.id, error: { code: -32001, message: 'definition rejected' } })
+    if (mode === 'exit') return process.exit(23)
     const configurationId = 'configuration-' + nextId++
     waiting.set(configurationId, () => send({ jsonrpc: '2.0', id: message.id, result: locationFor(uri) }))
     return send({ jsonrpc: '2.0', id: configurationId, method: 'workspace/configuration', params: { items: [{ section: 'typescript' }] } })
@@ -545,10 +613,10 @@ describe('Server TypeScript fallback', () => {
 
   function stub(mode = 'normal'): ServerOptions {
     return {
-      typescriptFallback: {
+      typescript: () => ({
         command: process.execPath,
         args: [path.join(stubDir, 'stub-server.cjs'), mode, path.join(stubDir, 'pid')],
-      },
+      }),
     }
   }
 
@@ -615,6 +683,7 @@ describe('Server TypeScript fallback', () => {
 
       expect(definition?.uri.endsWith('mongo.service.js')).toBe(true)
       expect(definition?.range.start.line).toBe(3)
+      expect(fs.existsSync(path.join(stubDir, 'pid'))).toBe(false)
     } finally {
       client.stop()
     }
@@ -627,6 +696,9 @@ describe('Server TypeScript fallback', () => {
     try {
       await initialize(client, pullCapabilities)
       expect(await definitionLine(client, uri)).toBe(2)
+      const shaped = writePlain('module.exports = { name: "store", methods: { find() {} } }')
+      const symbols = await client.request('textDocument/documentSymbol', { textDocument: { uri: shaped.uri } }) as Array<{ name: string }>
+      expect(symbols.map((symbol) => symbol.name)).toEqual(['stubSymbol'])
     } finally {
       client.stop()
     }
@@ -697,6 +769,39 @@ describe('Server TypeScript fallback', () => {
     }
   })
 
+  it('reads the file from disk after the client closes it', async () => {
+    const { uri } = writePlain()
+    const client = new Client(stub())
+    try {
+      await initialize(client, pullCapabilities)
+      client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'javascript', version: 1, text: `\n\n${plainSource}` } })
+      expect(await definitionLine(client, uri)).toBe(4)
+
+      client.notify('textDocument/didClose', { textDocument: { uri } })
+      expect(await definitionLine(client, uri)).toBe(2)
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('does not retain a file closed while TypeScript starts', async () => {
+    const { uri, filePath } = writePlain()
+    const barrierPath = path.join(root, 'barrier.js')
+    fs.writeFileSync(barrierPath, plainSource)
+    const client = new Client({ ...stub(), typescriptDiagnostics: true })
+    try {
+      await initialize(client, pullCapabilities)
+      client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'javascript', version: 1, text: plainSource } })
+      client.notify('textDocument/didClose', { textDocument: { uri } })
+      await definitionLine(client, `file://${barrierPath}`)
+
+      fs.writeFileSync(filePath, `\n\n${plainSource}`)
+      expect(await definitionLine(client, uri)).toBe(4)
+    } finally {
+      client.stop()
+    }
+  })
+
   it('returns the empty index result when the fallback is off', async () => {
     const { uri } = writePlain()
     const client = new Client()
@@ -711,17 +816,17 @@ describe('Server TypeScript fallback', () => {
   it.each([
     ['a missing binary', 'missing-server', false],
     ['a file that cannot be executed', 'not-executable', true],
-  ])('returns the empty index result when TypeScript is %s', async (_label, name, create) => {
+  ])('returns an explicit JSON-RPC error when tsrs is %s', async (_label, name, create) => {
     const command = path.join(stubDir, name)
     if (create) {
       fs.writeFileSync(command, '', { mode: 0o755 })
     }
     const { uri } = writePlain()
-    const client = new Client({ typescriptFallback: { command, args: [] } })
+    const client = new Client({ typescript: () => ({ command, args: [] }) })
     try {
       await initialize(client, pullCapabilities)
-      expect(await definitionLine(client, uri)).toBeUndefined()
-      expect(await definitionLine(client, uri)).toBeUndefined()
+      await expect(definitionLine(client, uri)).rejects.toThrow(/Bundled tsrs failed/)
+      await expect(definitionLine(client, uri)).rejects.toThrow(/Bundled tsrs failed/)
     } finally {
       client.stop()
     }
@@ -731,7 +836,7 @@ describe('Server TypeScript fallback', () => {
     const { uri } = writePlain()
     const client = new Client(stub('garbage'))
     await initialize(client, pullCapabilities)
-    expect(await definitionLine(client, uri)).toBeUndefined()
+    await expect(definitionLine(client, uri)).rejects.toThrow(/malformed message/)
     const pid = Number(fs.readFileSync(path.join(stubDir, 'pid'), 'utf8'))
 
     client.stop()
@@ -751,5 +856,88 @@ describe('Server TypeScript fallback', () => {
     await client.finished
 
     expect(await waitForExit(pid)).toBe(true)
+    expect(fs.readFileSync(path.join(stubDir, 'pid.shutdown'), 'utf8')).toBe('ok')
+  })
+
+  it.each([
+    ['initialize-error', -32602, /initialize rejected/],
+    ['request-error', -32001, /definition rejected/],
+    ['exit', -32603, /Bundled tsrs failed/],
+  ])('exposes child %s failures instead of an empty definition', async (mode, code, message) => {
+    const { uri } = writePlain()
+    const client = new Client(stub(mode))
+    try {
+      await initialize(client, pullCapabilities)
+      await expect(definitionLine(client, uri)).rejects.toMatchObject({ code, message: expect.stringMatching(message) })
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('keeps fallback lazy after an ordinary document is opened', async () => {
+    const { uri } = writePlain()
+    const client = new Client(stub())
+    try {
+      await initialize(client, pullCapabilities)
+      client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'javascript', version: 1, text: plainSource } })
+      await client.request('textDocument/diagnostic', { textDocument: { uri } })
+      expect(fs.existsSync(path.join(stubDir, 'pid'))).toBe(false)
+      expect(await definitionLine(client, uri)).toBe(2)
+    } finally {
+      client.stop()
+    }
+  })
+
+  it('exercises bundled tsrs with unsaved edits, close and watched dependency changes', async () => {
+    fs.rmSync(path.join(root, 'moleculer.config.js'))
+    const configPath = path.join(root, 'jsconfig.json')
+    const config = JSON.stringify({ compilerOptions: { allowJs: true, checkJs: true }, include: ['*.js'] })
+    fs.writeFileSync(configPath, config)
+    const helperPath = path.join(root, 'helper.js')
+    const helperUri = `file://${helperPath}`
+    const disk = 'exports.compute = function compute() { return 1 }'
+    fs.writeFileSync(helperPath, disk)
+    const { uri } = writePlain()
+    const client = new Client({ typescript: resolveTypeScriptCommand })
+    const definitions = async (): Promise<Array<{ uri: string; range: { start: { line: number } } }>> => {
+      const result = await client.request('textDocument/definition', {
+        textDocument: { uri }, position: positionOf(plainSource, 'compute'),
+      })
+      return Array.isArray(result) ? result : result === null ? [] : [result] as Array<{ uri: string; range: { start: { line: number } } }>
+    }
+    try {
+      await initialize(client, pullCapabilities)
+      client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'javascript', version: 1, text: plainSource } })
+      client.notify('textDocument/didOpen', { textDocument: { uri: helperUri, languageId: 'javascript', version: 1, text: `\n${disk}` } })
+      expect(await definitions()).toContainEqual(expect.objectContaining({ uri: helperUri, range: expect.objectContaining({ start: expect.objectContaining({ line: 1 }) }) }))
+      client.notify('textDocument/didChange', { textDocument: { uri: helperUri, version: 2 }, contentChanges: [{ text: `\n\n${disk}` }] })
+      expect(await definitions()).toContainEqual(expect.objectContaining({ uri: helperUri, range: expect.objectContaining({ start: expect.objectContaining({ line: 2 }) }) }))
+      client.notify('textDocument/didClose', { textDocument: { uri: helperUri } })
+      expect(await definitions()).toContainEqual(expect.objectContaining({ uri: helperUri, range: expect.objectContaining({ start: expect.objectContaining({ line: 0 }) }) }))
+      fs.writeFileSync(helperPath, `\n\n\n${disk}`)
+      let updated = false
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        updated = (await definitions()).some((site) => site.uri === helperUri && site.range.start.line === 3)
+        if (updated) break
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      expect(updated).toBe(true)
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(config)
+      await client.request('shutdown', undefined)
+    } finally {
+      client.stop()
+      await client.finished
+    }
+  }, 30000)
+  it('reports a broken diagnostics child as a JSON-RPC error rather than an empty report', async () => {
+    const { uri } = writePlain()
+    const client = new Client({ ...stub('garbage'), typescriptDiagnostics: true })
+    try {
+      await initialize(client, pullCapabilities)
+      await expect(definitionLine(client, uri)).rejects.toThrow(/malformed message/)
+      await expect(client.request('textDocument/diagnostic', { textDocument: { uri } })).rejects.toThrow(/malformed message/)
+    } finally {
+      client.stop()
+    }
   })
 })

@@ -2,9 +2,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { Index } from './index/Index.js'
-import { MoleculerParser } from './parser/moleculerParser.js'
+import { parse } from './parser/moleculerParser.js'
+import { collectFiles } from './scanner/files.js'
 import { Scanner } from './scanner/scanner.js'
 import { Server } from './lsp/server.js'
+import { resolveTypeScriptCommand } from './lsp/typescript-command.js'
+import { errorMessage, log } from './log.js'
 import { VERSION } from './version.js'
 
 const usage = `Usage: moleculer-lsp [options]
@@ -12,8 +15,8 @@ const usage = `Usage: moleculer-lsp [options]
 Options:
   --stdio                    Start the language server over stdio (default)
   --typescript-fallback      Send requests the index cannot answer, and hover, implementation,
-                             call hierarchy and workspace symbol requests, to TypeScript
-  --typescript-diagnostics   Also report TypeScript diagnostics for open files (implies --typescript-fallback)
+                             call hierarchy and workspace symbol requests, to bundled tsrs
+  --typescript-diagnostics   Also report tsrs diagnostics for open files (implies --typescript-fallback)
   --scan <dir>               Index a workspace and print a summary
   --parse <file>             Print symbols and references for one file
   --version                  Print the version
@@ -44,8 +47,9 @@ async function main(args: string[]): Promise<void> {
   }
 
   const typescriptDiagnostics = args.includes(typescriptDiagnosticsFlag)
+  const typescriptFallback = typescriptDiagnostics || args.includes(typescriptFallbackFlag)
   await new Server(process.stdin, process.stdout, {
-    typescriptFallback: typescriptDiagnostics || args.includes(typescriptFallbackFlag),
+    typescript: typescriptFallback ? resolveTypeScriptCommand : undefined,
     typescriptDiagnostics,
   }).run()
 }
@@ -54,15 +58,15 @@ function parseFile(filePath: string | undefined): void {
   if (filePath === undefined) {
     throw new Error('usage: moleculer-lsp --parse <file>')
   }
-  const result = new MoleculerParser().parse(filePath, fs.readFileSync(filePath, 'utf8'))
-  process.stdout.write(`file: ${filePath}\nservice: ${result.isService}\n`)
+  const result = parse(fs.readFileSync(filePath, 'utf8'))
+  process.stdout.write(`file: ${filePath}\nnamespace: ${result.namespace ?? '(none)'}\n`)
   process.stdout.write('symbols:\n')
-  for (const symbol of result.symbols) {
-    process.stdout.write(`  ${symbol.fullName} [${symbol.kind}] ${symbol.line + 1}:${symbol.column + 1}\n`)
+  for (const declaration of result.declarations) {
+    process.stdout.write(`  ${declaration.name} [${declaration.kind}] ${declaration.line + 1}:${declaration.column + 1}\n`)
   }
   process.stdout.write('references:\n')
   for (const reference of result.references) {
-    process.stdout.write(`  ${reference.fullName} [${reference.kind}] ${reference.location.line + 1}:${reference.location.column + 1}\n`)
+    process.stdout.write(`  ${reference.target} [${reference.kind}] ${reference.span.line + 1}:${reference.span.column + 1}\n`)
   }
   process.stdout.write('mixins:\n')
   for (const mixin of result.mixins) {
@@ -77,7 +81,7 @@ function scanWorkspace(rootPath: string | undefined): void {
   const index = new Index()
   const scanner = new Scanner(index)
   const started = Date.now()
-  const result = scanner.scan(path.resolve(rootPath))
+  const result = scanner.scan(collectFiles(path.resolve(rootPath)))
   const stats = index.stats()
 
   process.stdout.write(`root: ${rootPath}\n`)
@@ -98,6 +102,6 @@ function scanWorkspace(rootPath: string | undefined): void {
 }
 
 main(process.argv.slice(2)).catch((error: unknown) => {
-  process.stderr.write(`[moleculer-lsp] ${error instanceof Error ? error.message : String(error)}\n`)
+  log(errorMessage(error))
   process.exit(1)
 })

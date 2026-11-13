@@ -1,277 +1,121 @@
-import fs from 'node:fs'
-import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Index } from '../index/Index.js'
-import { Scanner } from '../scanner/scanner.js'
-import { MoleculerParser } from '../parser/moleculerParser.js'
-import { SymbolKind, type Location as IndexLocation, type OutlineNode, type Symbol } from '../types.js'
-import { CursorKind, detect } from './cursor.js'
-import { SymbolKind as LspSymbolKind, type DocumentSymbol, type DocumentSymbolParams, type Location, type Position, type ReferenceParams, type TextDocumentPositionParams } from './protocol.js'
+import { outline, type OutlineNode } from '../parser/outline.js'
+import { Resolution } from '../scanner/resolution.js'
+import { ReferenceKind, SymbolKind, type Location as IndexLocation, type Symbol } from '../types.js'
+import { CursorKind, targetAt, type CursorTarget } from './cursor.js'
+import { Documents } from './documents.js'
+import { spanRange, SymbolKind as LspSymbolKind, type DocumentSymbol, type DocumentSymbolParams, type Location, type Range, type ReferenceParams, type TextDocumentPositionParams } from './protocol.js'
+import { pathToUri, uriToPath } from './uri.js'
+
+interface Cursor {
+  target: CursorTarget
+  fileId: number
+  line: number
+}
 
 export class Handlers {
-  private readonly documents = new Map<string, string>()
+  constructor(
+    private readonly index: Index,
+    private readonly resolution: Resolution,
+    private readonly documents: Documents,
+  ) {}
 
-  constructor(private readonly index: Index, private readonly scanner: Scanner) {}
-
-  openDocument(uri: string, text: string): void {
-    this.documents.set(uri, text)
+  definition(params: TextDocumentPositionParams): Location | undefined {
+    const cursor = this.cursorAt(params)
+    if (cursor === undefined) {
+      return undefined
+    }
+    const symbol = this.resolve(cursor)
+    if (symbol !== undefined) {
+      return this.symbolLocation(symbol)
+    }
+    return cursor.target.kind === CursorKind.ServiceSegment ? this.serviceLocation(cursor.target.value) : undefined
   }
 
-  closeDocument(uri: string): void {
-    this.documents.delete(uri)
-  }
-
-  definition(params: TextDocumentPositionParams): Location | null {
-    const target = this.resolveAt(params)
-    if (target === undefined) {
-      return null
+  references(params: ReferenceParams): Location[] | undefined {
+    const cursor = this.cursorAt(params)
+    const symbol = cursor === undefined ? undefined : this.resolve(cursor)
+    if (symbol === undefined) {
+      return undefined
     }
-    if (target.kind === CursorKind.ServiceName && target.symbol.fileId === 0) {
-      return this.serviceLocation(target.fullName)
-    }
-    return this.symbolLocation(target.symbol)
-  }
-
-  references(params: ReferenceParams): Location[] {
-    const target = this.resolveAt(params)
-    if (target === undefined || (target.kind === CursorKind.ServiceName && target.symbol.fileId === 0)) {
-      return []
-    }
-    const locations = this.referencesFor(target.symbol, uriToPath(params.textDocument.uri))
+    const locations = this.resolution.references(symbol)
     if (locations.length === 0) {
-      return []
+      return undefined
     }
     const result = locations.map((location) => this.toLocation(location))
     if (params.context?.includeDeclaration === true) {
-      result.unshift(this.symbolLocation(target.symbol))
+      result.unshift(this.symbolLocation(symbol))
     }
     return result
   }
 
-  documentSymbols(params: DocumentSymbolParams): DocumentSymbol[] {
+  documentSymbols(params: DocumentSymbolParams): DocumentSymbol[] | undefined {
     const filePath = uriToPath(params.textDocument.uri)
-    const source = this.sourceFor(params.textDocument.uri, filePath)
-    if (source === undefined) {
-      return []
+    const source = this.documents.text(filePath)
+    const root = source === undefined ? undefined : outline(filePath, source)
+    if (source === undefined || root === undefined) {
+      return undefined
     }
-    const outline = new MoleculerParser().parse(filePath, source).outline
-    if (outline === undefined) {
-      return []
-    }
-    return [{
-      name: outline.name,
-      kind: LspSymbolKind.Object,
-      range: range(outline.line, outline.column, source),
-      selectionRange: selectionRange(outline.line, outline.column, outline.name.length),
-      children: outline.groups.map((group) => this.toDocumentSymbol(group, source)),
-    }]
+    const end = endOf(source)
+    const node = (name: string, kind: number, line: number, column: number, children: OutlineNode[]): DocumentSymbol => ({
+      name,
+      kind,
+      range: { start: { line, character: column }, end },
+      selectionRange: spanRange(line, column, name.length),
+      children: children.map((child) => node(child.name, documentSymbolKind(child.kind), child.line, child.column, child.children)),
+    })
+    return [node(root.name, LspSymbolKind.Object, root.line, root.column, root.groups)]
   }
 
-  private toDocumentSymbol(node: OutlineNode, source: string): DocumentSymbol {
-    return {
-      name: node.name,
-      kind: documentSymbolKind(node.kind),
-      range: range(node.line, node.column, source),
-      selectionRange: selectionRange(node.line, node.column, node.name.length),
-      children: node.children.map((child) => this.toDocumentSymbol(child, source)),
-    }
-  }
-
-  private referencesFor(symbol: Symbol, callerPath: string): IndexLocation[] {
-    const callerFileId = this.index.fileId(callerPath)
-    const locations = [...this.index.referencesTo(symbol.fullName)]
-    for (const candidate of this.index.allSymbols()) {
-      if (candidate.fullName === symbol.fullName || candidate.name !== symbol.name) {
-        continue
-      }
-      if (!this.sharesOrigin(symbol, candidate) && !this.scanner.isRelated(callerFileId, symbol.namespace, candidate)) {
-        continue
-      }
-      locations.push(...this.index.referencesTo(candidate.fullName))
-    }
-    return dedupe(locations)
-  }
-
-  private sharesOrigin(symbol: Symbol, candidate: Symbol): boolean {
-    return symbol.sourceFileId !== 0 && symbol.sourceFileId === candidate.sourceFileId
-  }
-
-  private resolveAt(params: TextDocumentPositionParams): ResolvedTarget | undefined {
+  private cursorAt(params: TextDocumentPositionParams): Cursor | undefined {
     const filePath = uriToPath(params.textDocument.uri)
-    const source = this.sourceFor(params.textDocument.uri, filePath)
-    if (source === undefined) {
-      return undefined
-    }
-    const fileId = this.index.fileId(filePath)
-    const namespace = this.scanner.namespaceOf(fileId)
-    const context = detect(source, params.position.line, params.position.character, namespace)
-    if (context.kind === CursorKind.Unknown) {
-      return undefined
-    }
-
-    if (context.rawString !== undefined) {
-      const event = this.findEvent(context.rawString, fileId, namespace)
-      if (event !== undefined) {
-        return { kind: context.kind, fullName: event.fullName, symbol: event }
-      }
-    }
-
-    const direct = this.index.lookup(context.fullName)
-    if (direct !== undefined) {
-      return { kind: context.kind, fullName: context.fullName, symbol: direct }
-    }
-
-    if (context.kind === CursorKind.ServiceName) {
-      return { kind: context.kind, fullName: context.fullName, symbol: placeholder(context.fullName) }
-    }
-
-    const requireRelated = context.chained === true || context.kind === CursorKind.DefinitionSite
-    const symbol = this.findByShortName(shortName(context.fullName), fileId, namespace, requireRelated)
-    return symbol === undefined ? undefined : { kind: context.kind, fullName: context.fullName, symbol }
+    const source = this.documents.text(filePath)
+    const { line, character } = params.position
+    const target = source === undefined ? undefined : targetAt(source, line, character)
+    return target === undefined ? undefined : { target, fileId: this.index.fileId(filePath), line }
   }
 
-  private findEvent(name: string, fileId: number, namespace: string): Symbol | undefined {
-    const matches = this.index.allSymbols().filter(
-      (symbol) => symbol.kind === SymbolKind.Event && symbol.name === name,
-    )
-    if (hasSingleOrigin(matches)) {
-      return matches[0]
+  private resolve({ target, fileId, line }: Cursor): Symbol | undefined {
+    if (target.kind === CursorKind.Text || target.kind === CursorKind.ServiceSegment) {
+      return this.resolution.resolveText(target.value, fileId)
     }
-    const related = matches.filter((symbol) => this.scanner.isRelated(fileId, namespace, symbol))
-    return hasSingleOrigin(related) ? related[0] : undefined
+    if (target.kind === CursorKind.Declaration) {
+      return this.declaredAt(fileId, line, target.value)
+    }
+    const resolved = this.resolution.resolve(ReferenceKind.Self, target.value, fileId)
+    return 'symbol' in resolved ? resolved.symbol : undefined
   }
 
-  private findByShortName(name: string, fileId: number, namespace: string, requireRelated: boolean): Symbol | undefined {
-    const matches = this.index.allSymbols().filter((symbol) => symbol.name === name)
-    if (matches.length <= 1 && !requireRelated) {
-      return matches[0]
-    }
-    const related = matches.filter((symbol) => this.scanner.isRelated(fileId, namespace, symbol))
-    if (related.length === 1) {
-      return related[0]
-    }
-    if (related.length > 1) {
-      return related.find((symbol) => symbol.fileId === symbol.sourceFileId) ?? related[0]
-    }
-    return undefined
+  private declaredAt(fileId: number, line: number, name: string): Symbol | undefined {
+    return this.index.symbolsByFile(fileId)
+      .find((symbol) => symbol.sourceFileId === fileId && symbol.line === line && symbol.name === name)
   }
 
-  private sourceFor(uri: string, filePath: string): string | undefined {
-    const cached = this.documents.get(uri)
-    if (cached !== undefined) {
-      return cached
-    }
-    try {
-      return fs.readFileSync(filePath, 'utf8')
-    } catch {
-      return undefined
-    }
-  }
-
-  private serviceLocation(fullName: string): Location | null {
-    const namespace = fullName.split('.').slice(0, -1).join('.')
-    if (namespace.length === 0) {
-      return null
-    }
-    for (const symbol of this.index.allSymbols()) {
-      if (symbol.namespace === namespace && symbol.fileId === symbol.sourceFileId) {
-        return { uri: pathToUri(this.index.filePath(symbol.fileId)), range: zeroRange() }
-      }
-    }
-    return null
+  private serviceLocation(value: string): Location | undefined {
+    const fileId = this.resolution.serviceFile(value.split('.').slice(0, -1).join('.'))
+    return fileId === undefined ? undefined : { uri: pathToUri(this.index.filePath(fileId)), range: spanRange(0, 0, 0) }
   }
 
   private symbolLocation(symbol: Symbol): Location {
-    const fileId = originFileId(symbol)
     return {
-      uri: pathToUri(this.index.filePath(fileId)),
-      range: {
-        start: { line: symbol.line, character: symbol.column },
-        end: { line: symbol.line, character: symbol.column + symbol.name.length },
-      },
+      uri: pathToUri(this.index.filePath(symbol.sourceFileId)),
+      range: spanRange(symbol.line, symbol.column, symbol.name.length),
     }
   }
 
   private toLocation(location: IndexLocation): Location {
-    const start = { line: location.line, character: location.column }
-    return { uri: pathToUri(this.index.filePath(location.fileId)), range: { start, end: start } }
+    return { uri: pathToUri(this.index.filePath(location.fileId)), range: spanRange(location.line, location.column, location.length) }
   }
-}
-
-interface ResolvedTarget {
-  kind: CursorKind
-  fullName: string
-  symbol: Symbol
-}
-
-export function uriToPath(uri: string): string {
-  return uri.startsWith('file:') ? fileURLToPath(uri) : uri
-}
-
-function pathToUri(filePath: string): string {
-  return pathToFileURL(filePath).toString()
 }
 
 function documentSymbolKind(kind: OutlineNode['kind']): number {
   if (kind === 'mixin') return LspSymbolKind.Module
   if (kind === 'group' || kind === 'hookPhase') return LspSymbolKind.Namespace
-  if (kind === 'event' || kind === 'channel') return LspSymbolKind.Event
+  if (kind === SymbolKind.Event || kind === SymbolKind.Channel) return LspSymbolKind.Event
   return LspSymbolKind.Method
 }
 
-function selectionRange(line: number, character: number, length: number): { start: Position; end: Position } {
-  return {
-    start: { line, character },
-    end: { line, character: character + length },
-  }
-}
-
-function range(line: number, character: number, source: string): { start: Position; end: Position } {
-  const lastLine = source.split('\n').length - 1
-  return {
-    start: { line, character },
-    end: { line: lastLine, character: (source.split('\n')[lastLine] ?? '').length },
-  }
-}
-
-function shortName(fullName: string): string {
-  const dot = fullName.lastIndexOf('.')
-  return dot < 0 ? fullName : fullName.slice(dot + 1)
-}
-
-function hasSingleOrigin(symbols: Symbol[]): boolean {
-  return symbols.length > 0 && new Set(symbols.map(originFileId)).size === 1
-}
-
-function originFileId(symbol: Symbol): number {
-  return symbol.sourceFileId === 0 ? symbol.fileId : symbol.sourceFileId
-}
-
-function dedupe(locations: IndexLocation[]): IndexLocation[] {
-  const seen = new Set<string>()
-  return locations.filter((location) => {
-    const key = `${location.fileId}:${location.line}:${location.column}`
-    if (seen.has(key)) {
-      return false
-    }
-    seen.add(key)
-    return true
-  })
-}
-
-function zeroRange(): { start: Position; end: Position } {
-  return { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
-}
-
-function placeholder(fullName: string): Symbol {
-  return {
-    id: 0,
-    name: shortName(fullName),
-    fullName,
-    namespace: '',
-    kind: SymbolKind.Action,
-    fileId: 0,
-    sourceFileId: 0,
-    line: 0,
-    column: 0,
-  }
+function endOf(source: string): Range['end'] {
+  const lines = source.split('\n')
+  return { line: lines.length - 1, character: (lines[lines.length - 1] ?? '').length }
 }

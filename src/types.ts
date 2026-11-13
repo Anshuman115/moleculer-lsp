@@ -6,89 +6,67 @@ export enum SymbolKind {
 }
 
 export enum ReferenceKind {
-  Call = 'call',
-  Emit = 'emit',
-  Broadcast = 'broadcast',
+  Action = 'action',
+  Event = 'event',
   Channel = 'channel',
+  Self = 'self',
 }
 
 export enum DropReason {
-  NamespaceEmpty = 'namespace-empty',
-  BrokenRequirePath = 'broken-require-path',
   NameCollision = 'name-collision',
   EventNoListener = 'event-no-listener',
   GenuinelyUnresolved = 'genuinely-unresolved',
 }
 
-export interface Symbol {
-  id: number
+export interface Declaration {
   name: string
-  fullName: string
-  namespace: string
   kind: SymbolKind
-  fileId: number
-  sourceFileId: number
   line: number
   column: number
 }
 
-export interface Location {
+export interface Symbol extends Declaration {
+  fullName: string
+  namespace: string
   fileId: number
+  sourceFileId: number
+}
+
+export interface Span {
   line: number
   column: number
+  length: number
+}
+
+export interface Location extends Span {
+  fileId: number
 }
 
 export interface Reference {
-  fullName: string
-  location: Location
   kind: ReferenceKind
+  target: string
+  span: Span
 }
 
 export interface MixinRequest {
   mixinName: string
   requirePath: string
-  sourceFile: string
-}
-
-export interface OutlineNode {
-  name: string
-  kind: 'root' | 'group' | 'action' | 'event' | 'method' | 'channel' | 'mixin' | 'hookPhase' | 'hook'
-  line: number
-  column: number
-  children: OutlineNode[]
-}
-
-export interface DocumentOutline {
-  name: string
-  line: number
-  column: number
-  groups: OutlineNode[]
 }
 
 export interface ParseResult {
-  symbols: Symbol[]
+  namespace: string | undefined
+  declarations: Declaration[]
   references: Reference[]
   mixins: MixinRequest[]
-  isService: boolean
-  outline?: DocumentOutline
 }
 
 export interface DroppedReference {
-  fullName: string
   kind: ReferenceKind
+  target: string
   location: Location
   reason: DropReason
 }
 
-export interface MixinFailure {
-  mixinName: string
-  requirePath: string
-  sourceFile: string
-  reason: DropReason
-}
-
-export interface IndexStats {
-  symbolCount: number
-  fileCount: number
-  referenceCount: number
+export interface MixinFailure extends MixinRequest {
+  filePath: string
 }
