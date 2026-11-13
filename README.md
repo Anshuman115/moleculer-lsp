@@ -18,9 +18,11 @@ npm install -g moleculer-lsp
 moleculer-lsp --stdio --typescript-diagnostics
 ```
 
-Requires Node.js 18 or later. tsrs `0.25.0-ts7.1.0-beta` installs with the package and requires its platform-specific optional dependency. Do not install with `--omit=optional`. tsrs is beta; see its [compatibility notes](https://github.com/oxc-project/tsrs/blob/main/docs/COMPATIBILITY.md).
+Requires Node.js 18 or later. JavaScript support comes from [tsrs](https://github.com/oxc-project/tsrs) `0.25.0-ts7.1.0-beta`, a Rust port of the TypeScript language server, installed with this package. You do not need a separate TypeScript language server. Do not install with `--omit=optional`; tsrs needs its platform-specific optional dependency. tsrs is beta; see its [compatibility notes](https://github.com/oxc-project/tsrs/blob/main/docs/COMPATIBILITY.md).
 
 ## Client setup
+
+Use this server for `.js` files instead of any other JavaScript or TypeScript language server. It handles Moleculer and plain JavaScript in one server, and most clients send each file to only one server. Keep your TypeScript server for `.ts` files.
 
 ### Claude Code
 
@@ -31,7 +33,7 @@ claude plugin install moleculer-lsp@moleculer-tools
 
 The plugin uses the CLI installed above, running `moleculer-lsp --stdio --typescript-diagnostics` from `PATH` for `.js` files. Restart Claude Code after installation or updates.
 
-If another plugin also registers `.js`, check the LSP debug logs and ensure Moleculer LSP handles JavaScript. Do not rely on results from both servers being merged. Keep a separate TypeScript server registered for its other extensions.
+If the official `typescript-lsp` plugin is installed, Claude Code sends `.js` files to it instead. Disable it with `claude plugin disable typescript-lsp@claude-plugins-official`. That also removes its `.ts` support.
 
 ### oh-my-pi (omp)
 
@@ -130,6 +132,11 @@ Warm Moleculer definition p50 was 1 ms or less in both runs.
 Single sequential run per version with `--typescript-diagnostics`, normal SDK type resolution, 20 Moleculer call positions, 20 local-import positions and five repeated requests per position. tsrs used default mode and native macOS watching. RSS is a snapshot after requests and edits.
 
 Nonempty-response counts matched: 20/20 Moleculer definitions, 20/20 Moleculer references, 17/20 JavaScript definitions and 19/20 hovers.
+
+## Roadmap
+
+- TypeScript Moleculer projects: definitions, references and diagnostics for services written in `.ts`.
+- A Rust implementation of the Moleculer index, for faster scans and lower memory use.
 
 ## Development
 
