@@ -1,4 +1,5 @@
 import { parse } from 'acorn'
+import type { Span } from '../types.js'
 
 export interface AstNode {
   type: string
@@ -17,19 +18,15 @@ export function isNode(value: unknown): value is AstNode {
 }
 
 export function parseSource(source: string): AstNode {
-  for (const sourceType of ['script', 'module'] as const) {
-    try {
-      return parse(source, {
-        ecmaVersion: 'latest',
-        sourceType,
-        locations: true,
-        allowHashBang: true,
-      }) as unknown as AstNode
-    } catch {
-      continue
-    }
+  try {
+    return parseAs(source, 'script')
+  } catch {
+    return parseAs(source, 'module')
   }
-  return { type: 'Program', start: 0, end: 0, body: [], loc: null }
+}
+
+function parseAs(source: string, sourceType: 'script' | 'module'): AstNode {
+  return parse(source, { ecmaVersion: 'latest', sourceType, locations: true, allowHashBang: true }) as unknown as AstNode
 }
 
 export function walk(root: AstNode, visit: (node: AstNode) => void): void {
@@ -46,7 +43,7 @@ export function walk(root: AstNode, visit: (node: AstNode) => void): void {
   }
 }
 
-export function children(node: AstNode): AstNode[] {
+function children(node: AstNode): AstNode[] {
   const result: AstNode[] = []
   for (const [key, value] of Object.entries(node)) {
     if (skipKeys.has(key)) {
@@ -74,6 +71,11 @@ export function line(node: AstNode): number {
 
 export function column(node: AstNode): number {
   return node.loc?.start.column ?? 0
+}
+
+export function nameSpan(node: AstNode, name: string): Span {
+  const quoted = node.type === 'Literal' || node.type === 'TemplateLiteral'
+  return { line: line(node), column: column(node) + (quoted ? 1 : 0), length: name.length }
 }
 
 export function identifier(node: unknown): string | undefined {
@@ -160,8 +162,4 @@ export function objectProperty(node: AstNode | undefined, name: string): AstNode
 
 export function firstArgument(call: AstNode): AstNode | undefined {
   return Array.isArray(call.arguments) && isNode(call.arguments[0]) ? call.arguments[0] : undefined
-}
-
-export function firstStringArgument(call: AstNode): string | undefined {
-  return stringValue(firstArgument(call))
 }

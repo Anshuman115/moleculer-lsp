@@ -1,34 +1,26 @@
+import { isDeclarationKey, reservedThisProps } from '../parser/schema.js'
+
 export enum CursorKind {
-  Unknown = 'unknown',
-  ActionString = 'actionString',
-  ServiceName = 'serviceName',
-  MethodAccess = 'methodAccess',
-  DefinitionSite = 'definitionSite',
+  Text = 'text',
+  ServiceSegment = 'serviceSegment',
+  Member = 'member',
+  Declaration = 'declaration',
 }
 
-export interface CursorContext {
+export interface CursorTarget {
   kind: CursorKind
-  fullName: string
-  rawString?: string
-  chained?: boolean
+  value: string
 }
 
-const reservedThisProps = new Set([
-  'broker', 'logger', 'actions', 'settings', 'metadata', 'schema', 'Promise', 'name', 'version',
-])
-
-export function detect(source: string, line: number, character: number, namespace: string): CursorContext {
+export function targetAt(source: string, line: number, character: number): CursorTarget | undefined {
   const text = source.split('\n')[line]
   if (text === undefined) {
-    return unknown()
+    return undefined
   }
-  return definitionAt(text, character, namespace)
-    ?? stringLiteralAt(text, character, namespace)
-    ?? thisCallAt(text, character, namespace)
-    ?? unknown()
+  return definitionAt(text, character) ?? stringLiteralAt(text, character) ?? thisCallAt(text, character)
 }
 
-function stringLiteralAt(text: string, character: number, namespace: string): CursorContext | undefined {
+function stringLiteralAt(text: string, character: number): CursorTarget | undefined {
   let i = 0
   while (i < text.length) {
     const quote = text[i]
@@ -42,42 +34,37 @@ function stringLiteralAt(text: string, character: number, namespace: string): Cu
       i += text[i] === '\\' ? 2 : 1
     }
     if (i < text.length && character > start && character <= i) {
-      return classifyString(text.slice(start + 1, i), character - start - 1, namespace)
+      return classifyString(text.slice(start + 1, i), character - start - 1)
     }
     i += 1
   }
   return undefined
 }
 
-function classifyString(value: string, offset: number, namespace: string): CursorContext | undefined {
-  if (value.length === 0) {
-    return undefined
-  }
+function classifyString(value: string, offset: number): CursorTarget | undefined {
   const parts = value.split('.')
   if (parts.length < 2) {
-    return isIdentifier(value)
-      ? { kind: CursorKind.MethodAccess, fullName: `${namespace}.${value}`, rawString: value }
-      : undefined
+    return isIdentifier(value) ? { kind: CursorKind.Text, value } : undefined
   }
   let position = 0
   for (let i = 0; i < parts.length; i += 1) {
     const part = parts[i] ?? ''
     if (offset >= position && offset < position + part.length) {
-      return { kind: segmentKind(parts, i), fullName: value, rawString: value }
+      return { kind: segmentKind(parts, i), value }
     }
     position += part.length + 1
   }
-  return { kind: CursorKind.ActionString, fullName: value, rawString: value }
+  return { kind: CursorKind.Text, value }
 }
 
 function segmentKind(parts: string[], index: number): CursorKind {
   const first = parts[0] ?? ''
   const versioned = first.length >= 2 && first[0] === 'v' && isDigit(first[1] ?? '')
   const serviceIndex = versioned ? 1 : 0
-  return index <= serviceIndex ? CursorKind.ServiceName : CursorKind.ActionString
+  return index <= serviceIndex ? CursorKind.ServiceSegment : CursorKind.Text
 }
 
-function thisCallAt(text: string, character: number, namespace: string): CursorContext | undefined {
+function thisCallAt(text: string, character: number): CursorTarget | undefined {
   const marker = 'this.'
   let from = 0
   while (from < text.length) {
@@ -97,14 +84,14 @@ function thisCallAt(text: string, character: number, namespace: string): CursorC
     const blocked = holder === undefined ? reservedThisProps.has(method) : reservedThisProps.has(holder)
     const methodStart = nameStart + text.slice(nameStart, open).indexOf(raw) + dot + 1
     if (isMemberChain(raw) && !blocked && character >= methodStart && character < methodStart + method.length) {
-      return { kind: CursorKind.MethodAccess, fullName: `${namespace}.${method}`, chained: holder !== undefined }
+      return { kind: CursorKind.Member, value: method }
     }
     from = open + 1
   }
   return undefined
 }
 
-function definitionAt(text: string, character: number, namespace: string): CursorContext | undefined {
+function definitionAt(text: string, character: number): CursorTarget | undefined {
   const indent = text.length - text.trimStart().length
   const name = definitionName(text.trim())
   if (name === undefined) {
@@ -114,10 +101,7 @@ function definitionAt(text: string, character: number, namespace: string): Curso
   if (start < 0 || character < start || character >= start + name.length) {
     return undefined
   }
-  return {
-    kind: CursorKind.DefinitionSite,
-    fullName: namespace.length === 0 ? name : `${namespace}.${name}`,
-  }
+  return { kind: CursorKind.Declaration, value: name }
 }
 
 function definitionName(trimmed: string): string | undefined {
@@ -129,7 +113,7 @@ function definitionName(trimmed: string): string | undefined {
   }
   const head = stripAsync(trimmed.slice(0, boundary)).trim()
   const name = unquote(head)
-  if (name.length === 0 || name === 'handler' || /[\s\t]/.test(name)) {
+  if (name.length === 0 || !isDeclarationKey(name) || /\s/.test(name)) {
     return undefined
   }
   if (name.includes('.') && name === head) {
@@ -164,8 +148,4 @@ function isIdentifier(value: string): boolean {
 
 function isMemberChain(value: string): boolean {
   return /^[a-zA-Z_$][a-zA-Z0-9_$]*(\.[a-zA-Z_$][a-zA-Z0-9_$]*)*$/.test(value)
-}
-
-function unknown(): CursorContext {
-  return { kind: CursorKind.Unknown, fullName: '' }
 }

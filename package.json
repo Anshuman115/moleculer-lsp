@@ -1,6 +1,6 @@
 {
   "name": "moleculer-lsp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Language server for Moleculer.js: go to definition, find references, document symbols and diagnostics across services, mixins and events",
   "keywords": [
     "moleculer",
@@ -34,7 +34,7 @@
   },
   "scripts": {
     "build": "tsc --noEmit && npm run bundle",
-    "bundle": "esbuild src/main.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/main.js --banner:js=\"import{createRequire}from'node:module';const require=createRequire(import.meta.url);\"",
+    "bundle": "esbuild src/main.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/main.js --banner:js=\"import{createRequire as createBundledRequire}from'node:module';const require=createBundledRequire(import.meta.url);\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run src",
     "dev": "tsx src/main.ts",
@@ -47,9 +47,10 @@
     "chokidar": "^4.0.3",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.2",
+    "typescript": "7.0.2",
     "vitest": "^2.1.8"
   },
   "dependencies": {
-    "typescript": "^7.0.2"
+    "tsrs": "0.25.0-ts7.1.0-beta"
   }
 }

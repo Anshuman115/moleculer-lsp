@@ -3,7 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Index } from '../index/Index.js'
-import { Scanner } from './scanner.js'
+import { collectFiles } from './files.js'
+import { Scanner, type ScanResult } from './scanner.js'
 import { DropReason, SymbolKind } from '../types.js'
 
 let root: string
@@ -15,10 +16,18 @@ function write(relativePath: string, source: string): string {
   return fullPath
 }
 
-function scan(): { index: Index; scanner: Scanner; result: ReturnType<Scanner['scan']> } {
+function scan(): { index: Index; scanner: Scanner; result: ScanResult } {
   const index = new Index()
   const scanner = new Scanner(index)
-  return { index, scanner, result: scanner.scan(root) }
+  return { index, scanner, result: scanner.scan(collectFiles(root)) }
+}
+
+function usesOf(index: Index, fullName: string, kind: SymbolKind): number {
+  const symbol = index.lookup(fullName, kind)
+  if (symbol === undefined) {
+    throw new Error(`${fullName} is not indexed`)
+  }
+  return index.referencesTo(symbol).length
 }
 
 beforeEach(() => {
@@ -40,8 +49,8 @@ describe('Scanner', () => {
     write('mail.service.js', 'module.exports = { name: "mail", actions: { send() {} } }')
 
     const { index, result } = scan()
-    expect(index.lookup('mail.send')).toBeDefined()
-    expect(index.referencesTo('mail.send')).toHaveLength(1)
+    expect(index.lookup('mail.send', SymbolKind.Action)).toBeDefined()
+    expect(usesOf(index, 'mail.send', SymbolKind.Action)).toBe(1)
     expect(result.dropped).toHaveLength(0)
   })
 
@@ -61,8 +70,8 @@ describe('Scanner', () => {
     `)
 
     const { index, result } = scan()
-    expect(index.lookup('leaf.shared')).toBeDefined()
-    expect(index.lookup('middle.shared')).toBeDefined()
+    expect(index.lookup('leaf.shared', SymbolKind.Method)).toBeDefined()
+    expect(index.lookup('middle.shared', SymbolKind.Method)).toBeDefined()
     expect(result.dropped).toHaveLength(0)
   })
 
@@ -82,8 +91,8 @@ describe('Scanner', () => {
     `)
 
     const { index, result } = scan()
-    expect(index.lookup('middle.shared')).toBeDefined()
-    expect(index.lookup('leaf.shared')).toBeDefined()
+    expect(index.lookup('middle.shared', SymbolKind.Method)).toBeDefined()
+    expect(index.lookup('leaf.shared', SymbolKind.Method)).toBeDefined()
     expect(result.dropped).toHaveLength(0)
   })
 
@@ -120,8 +129,34 @@ describe('Scanner', () => {
     `)
 
     const { result } = scan()
-    expect(result.mixinFailures).toHaveLength(1)
-    expect(result.mixinFailures[0]?.reason).toBe(DropReason.BrokenRequirePath)
+    expect(result.mixinFailures).toEqual([
+      { mixinName: 'Missing', requirePath: './does-not-exist.mixin', filePath: path.join(root, 'users.service.js') },
+    ])
+  })
+
+  it('applies a mixin required by absolute path', () => {
+    const basePath = write('base.mixin.js', 'module.exports = { methods: { shared() {} } }')
+    write('users.service.js', `
+      const Base = require(${JSON.stringify(basePath)});
+      module.exports = { name: "users", mixins: [Base] }
+    `)
+
+    const { index, result } = scan()
+    expect(result.mixinFailures).toEqual([])
+    expect(index.lookup('users.shared', SymbolKind.Method)).toBeDefined()
+  })
+
+  it('resolves a self-call in a named mixin through a sibling mixin of its host', () => {
+    write('base.mixin.js', 'module.exports = { methods: { siteCode() {} } }')
+    write('parser.mixin.js', 'module.exports = { name: "parser", methods: { parse() { return this.siteCode() } } }')
+    write('provider.service.js', `
+      const Base = require("./base.mixin");
+      const Parser = require("./parser.mixin");
+      module.exports = { name: "provider", mixins: [Base, Parser] }
+    `)
+
+    const { result } = scan()
+    expect(result.dropped).toEqual([])
   })
 
   it('ignores package mixins that are not local files', () => {
@@ -149,7 +184,7 @@ describe('Scanner', () => {
     `)
 
     const { index } = scan()
-    expect(index.referencesTo('billing.invoice.paid')).toHaveLength(1)
+    expect(usesOf(index, 'billing.invoice.paid', SymbolKind.Event)).toBe(1)
   })
 
   it('reports a collision when a short event name matches unrelated services', () => {
@@ -179,8 +214,8 @@ describe('Scanner', () => {
 
     const { index, result } = scan()
     expect(result.dropped.filter((entry) => entry.reason === DropReason.NameCollision)).toHaveLength(0)
-    expect(index.referencesTo('alpha.refresh')).toHaveLength(1)
-    expect(index.referencesTo('beta.refresh')).toHaveLength(0)
+    expect(usesOf(index, 'alpha.refresh', SymbolKind.Event)).toBe(1)
+    expect(usesOf(index, 'beta.refresh', SymbolKind.Event)).toBe(0)
   })
 
   it('marks an emit with no listener anywhere', () => {
@@ -199,7 +234,7 @@ describe('Scanner', () => {
     write('users.service.js', 'module.exports = { name: "users", actions: { create() {} } }')
     const { index, scanner } = scan()
     const first = index.stats().symbolCount
-    scanner.scan(root)
+    scanner.scan(collectFiles(root))
     expect(index.stats().symbolCount).toBe(first)
   })
 
@@ -207,8 +242,8 @@ describe('Scanner', () => {
     write('users.service.js', 'module.exports = { name: "users", actions: { create() {} } }')
     const { index, scanner } = scan()
     write('mail.service.js', 'module.exports = { name: "mail", actions: { send() {} } }')
-    scanner.scan(root)
-    expect(index.lookup('mail.send')).toBeDefined()
+    scanner.scan(collectFiles(root))
+    expect(index.lookup('mail.send', SymbolKind.Action)).toBeDefined()
   })
 
   it('skips node_modules while collecting files', () => {
@@ -216,13 +251,31 @@ describe('Scanner', () => {
     write('node_modules/pkg/vendor.service.js', 'module.exports = { name: "vendor", actions: { hidden() {} } }')
 
     const { index } = scan()
-    expect(index.lookup('vendor.hidden')).toBeUndefined()
+    expect(index.lookup('vendor.hidden', SymbolKind.Action)).toBeUndefined()
   })
 
-  it('records event symbols with the event kind', () => {
-    write('billing.service.js', 'module.exports = { name: "billing", events: { "invoice.paid"() {} } }')
+  it('keeps an action and a method of the same name apart', () => {
+    write('users.service.js', `
+      module.exports = {
+        name: "users",
+        actions: { audit(ctx) { return this.audit(ctx.params) } },
+        methods: { audit(params) { return params } },
+      }
+    `)
+    write('admin.service.js', 'module.exports = { name: "admin", actions: { run(ctx) { return ctx.call("users.audit") } } }')
+
     const { index } = scan()
-    expect(index.lookup('billing.invoice.paid')?.kind).toBe(SymbolKind.Event)
+    expect(usesOf(index, 'users.audit', SymbolKind.Action)).toBe(1)
+    expect(usesOf(index, 'users.audit', SymbolKind.Method)).toBe(1)
+  })
+
+  it('skips a file that does not parse and indexes the rest', () => {
+    write('broken.service.js', 'module.exports = { name: "broken", ')
+    write('users.service.js', 'module.exports = { name: "users", actions: { create() {} } }')
+
+    const { index, result } = scan()
+    expect(result.fileCount).toBe(1)
+    expect(index.lookup('users.create', SymbolKind.Action)).toBeDefined()
   })
 
   it('does not flag a collision when the same mixin event handler fans out to multiple services', () => {
@@ -307,7 +360,7 @@ describe('Scanner', () => {
     `)
 
     const { index } = scan()
-    expect(index.referencesTo('user-consumer.user.addaccount')).toHaveLength(1)
+    expect(usesOf(index, 'user-consumer.user.addaccount', SymbolKind.Event)).toBe(1)
   })
 
   it('recognizes broker.sendToChannel(...) as a channel reference', () => {
@@ -329,7 +382,7 @@ describe('Scanner', () => {
     `)
 
     const { index } = scan()
-    expect(index.referencesTo('orders.orders.created')).toHaveLength(1)
+    expect(usesOf(index, 'orders.orders.created', SymbolKind.Channel)).toBe(1)
   })
 
   it('resolves broadcast(...) against event listeners', () => {
@@ -351,7 +404,7 @@ describe('Scanner', () => {
     `)
 
     const { index, result } = scan()
-    expect(index.referencesTo('listener.cache.cleared')).toHaveLength(1)
+    expect(usesOf(index, 'listener.cache.cleared', SymbolKind.Event)).toBe(1)
     expect(result.dropped).toHaveLength(0)
   })
 })

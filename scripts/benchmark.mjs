@@ -4,30 +4,38 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const serverPath = fileURLToPath(new URL('../dist/main.js', import.meta.url))
+const serverPath = path.resolve(process.env.MOLECULER_LSP_SERVER ?? fileURLToPath(new URL('../dist/main.js', import.meta.url)))
 const ignored = new Set(['node_modules', '.git', 'dist', 'build', 'coverage'])
 const samplesPerKind = 20
 const warmRounds = 5
 const requestTimeoutMs = 30000
+const clients = new Set()
 
 class Client {
   constructor(command, args, cwd) {
     this.child = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'ignore'] })
+    clients.add(this)
     this.buffer = Buffer.alloc(0)
     this.nextId = 1
     this.pending = new Map()
     this.listeners = []
+    this.opened = new Set()
     this.child.stdout.on('data', (chunk) => this.receive(chunk))
+    this.child.on('error', (error) => this.fail(error))
+    this.child.on('exit', (code, signal) => {
+      clients.delete(this)
+      this.fail(new Error(`LSP exited (${code ?? signal})`))
+    })
   }
 
   request(method, params) {
     const id = this.nextId++
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`${method} timed out`)), requestTimeoutMs)
-      this.pending.set(id, (result) => {
-        clearTimeout(timer)
-        resolve(result)
-      })
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`${method} timed out`))
+      }, requestTimeoutMs)
+      this.pending.set(id, { resolve, reject, timer })
       this.send({ jsonrpc: '2.0', id, method, params })
     })
   }
@@ -79,17 +87,46 @@ class Client {
       return
     }
     if (message.id !== undefined) {
-      this.pending.get(message.id)?.(message.result)
+      const pending = this.pending.get(message.id)
+      if (pending === undefined) return
       this.pending.delete(message.id)
+      clearTimeout(pending.timer)
+      if (message.error !== undefined) {
+        pending.reject(new Error(JSON.stringify(message.error)))
+      } else {
+        pending.resolve(message.result)
+      }
       return
     }
     this.listeners = this.listeners.filter((listener) => !listener(message))
   }
 
+  fail(error) {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(error)
+    }
+    this.pending.clear()
+  }
+
   async stop() {
-    await this.request('shutdown', null)
-    this.notify('exit', null)
-    this.child.kill()
+    if (this.child.exitCode !== null || this.child.signalCode !== null) return
+    try {
+      await this.request('shutdown')
+      this.notify('exit')
+    } finally {
+      this.child.stdin.end()
+      await new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          this.child.kill()
+          resolve()
+        }, 1000)
+        this.child.once('exit', () => {
+          clearTimeout(timer)
+          resolve()
+        })
+      })
+    }
   }
 }
 
@@ -167,20 +204,23 @@ function uriOf(filePath) {
   return pathToFileURL(filePath).href
 }
 
-function rssMb(pid) {
-  try {
-    return Number(execFileSync('ps', ['-o', 'rss=', '-p', String(pid)], { encoding: 'utf8' }).trim()) / 1024
-  } catch {
-    return undefined
+function memoryOf(pid) {
+  const rows = execFileSync('ps', ['-axo', 'pid=,ppid=,rss='], { encoding: 'utf8' })
+    .trim().split('\n').map((line) => line.trim().split(/\s+/).map(Number))
+  const descendants = new Set([pid])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const [child, parent] of rows) {
+      if (descendants.has(parent) && !descendants.has(child)) {
+        descendants.add(child)
+        changed = true
+      }
+    }
   }
-}
-
-function childPids(pid) {
-  try {
-    return execFileSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' }).trim().split('\n').filter(Boolean).map(Number)
-  } catch {
-    return []
-  }
+  const server = (rows.find(([child]) => child === pid)?.[2] ?? 0) / 1024
+  const total = rows.filter(([child]) => descendants.has(child)).reduce((sum, row) => sum + row[2], 0) / 1024
+  return { server, typescript: total - server, total, unit: 'MiB', measurement: 'process-tree RSS snapshot' }
 }
 
 async function start(command, args, root) {
@@ -194,10 +234,10 @@ async function start(command, args, root) {
   return { client, initializeMs: initialize.ms }
 }
 
-function open(client, sample, opened) {
-  if (!opened.has(sample.filePath)) {
+function open(client, sample) {
+  if (!client.opened.has(sample.filePath)) {
     client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(sample.filePath), languageId: 'javascript', version: 1, text: sample.text } })
-    opened.add(sample.filePath)
+    client.opened.add(sample.filePath)
     if (client.pullDiagnosticsOnOpen) {
       client.request('textDocument/diagnostic', { textDocument: { uri: uriOf(sample.filePath) } }).catch(() => undefined)
     }
@@ -206,12 +246,11 @@ function open(client, sample, opened) {
 
 async function measure(client, method, samples, extra = {}) {
   progress(`${method} on ${samples.length} samples`)
-  const opened = new Set()
   const first = []
   const warm = []
   let answered = 0
   for (const sample of samples) {
-    open(client, sample, opened)
+    open(client, sample)
     const params = { textDocument: { uri: uriOf(sample.filePath) }, position: sample.position, ...extra }
     const cold = await timed(() => client.request(method, params))
     first.push(cold.ms)
@@ -266,16 +305,16 @@ async function editLoop(client, sample) {
 }
 
 function typescriptCommand() {
-  const manifest = fileURLToPath(new URL('../node_modules/typescript/bin/tsc', import.meta.url))
+  const manifest = process.env.TYPESCRIPT_LSP_BIN
+    ?? fileURLToPath(new URL('../node_modules/tsrs/bin/tsrs', import.meta.url))
   return [process.execPath, [manifest, '--lsp', '--stdio']]
 }
 
 async function benchmarkServer(root, samples, flag) {
   progress(`moleculer-lsp ${flag}`)
   const { client, initializeMs } = await start(process.execPath, [serverPath, '--stdio', flag], root)
-  const opened = new Set()
   const firstCall = samples.calls[0] ?? samples.imports[0]
-  open(client, firstCall, opened)
+  open(client, firstCall)
   const indexReady = await timed(() => client.request('textDocument/definition', { textDocument: { uri: uriOf(firstCall.filePath) }, position: firstCall.position }))
   const firstImport = samples.imports[0]
   const typescriptReady = firstImport === undefined ? undefined
@@ -287,7 +326,7 @@ async function benchmarkServer(root, samples, flag) {
     await measure(client, 'textDocument/hover', samples.imports),
   ]
   const edit = samples.calls[0] === undefined || flag !== '--typescript-diagnostics' ? undefined : await editLoop(client, samples.calls[0])
-  const memory = { server: rssMb(client.child.pid), typescript: childPids(client.child.pid).map(rssMb).reduce((sum, value) => sum + (value ?? 0), 0) }
+  const memory = memoryOf(client.child.pid)
   await client.stop()
   return { initializeMs, firstAnswerMs: indexReady.ms, firstTypescriptAnswerMs: typescriptReady?.ms, results, edit, memory }
 }
@@ -299,7 +338,7 @@ async function benchmarkTypescript(root, samples, pullDiagnostics) {
   client.pullDiagnosticsOnOpen = pullDiagnostics
   const firstImport = samples.imports[0]
   const ready = firstImport === undefined ? undefined : await timed(async () => {
-    open(client, firstImport, new Set())
+    open(client, firstImport)
     return client.request('textDocument/definition', { textDocument: { uri: uriOf(firstImport.filePath) }, position: firstImport.position })
   })
   const results = [
@@ -308,7 +347,7 @@ async function benchmarkTypescript(root, samples, pullDiagnostics) {
     await measure(client, 'textDocument/definition', samples.imports),
     await measure(client, 'textDocument/hover', samples.imports),
   ]
-  const memory = rssMb(client.child.pid)
+  const memory = memoryOf(client.child.pid)
   await client.stop()
   return { firstAnswerMs: ready?.ms, results, memory }
 }
@@ -322,9 +361,14 @@ async function main() {
   const root = path.resolve(process.argv[2] ?? '.')
   const files = listFiles(root)
   const samples = findSamples(files)
+  if (samples.calls.length === 0 && samples.imports.length === 0) {
+    throw new Error('No literal Moleculer calls or local-import usages found for benchmarking')
+  }
   const report = {
     root,
     node: process.version,
+    serverPath,
+    externalServer: typescriptCommand()[1][0],
     files: files.length,
     samples: { calls: samples.calls.length, imports: samples.imports.length },
     scan: scanSummary(root),
@@ -336,5 +380,8 @@ async function main() {
   process.stdout.write(`${JSON.stringify(report, (_key, value) => (typeof value === 'number' ? Math.round(value * 10) / 10 : value), 2)}\n`)
 }
 
-await main()
-process.exit(0)
+try {
+  await main()
+} finally {
+  await Promise.all([...clients].map((client) => client.stop().catch(() => client.child.kill())))
+}

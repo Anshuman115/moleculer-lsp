@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+### Changed
+
+- JavaScript fallback uses the bundled, pinned `tsrs` language server. No separate TypeScript server installation or executable discovery is required.
+- Imported SDK types use normal project resolution. Project configuration files are not rewritten.
+- TypeScript is a development dependency only.
+
+### Fixed
+
+- Definition and references enforce service namespaces and distinguish actions from methods with the same name.
+- Mixins that combine other mixins retain transitive definitions and references.
+- Shared mixins do not choose between host-specific method implementations. Ambiguous self-calls produce hints rather than errors.
+- Diagnostic URIs preserve paths containing `#` or `?`.
+- JavaScript fallback remains available when the Moleculer index fails.
+- Closing a document clears its diagnostics and prevents reopening it during fallback initialization.
+- Scanner and watcher directory exclusions match.
+- Non-Moleculer workspaces leave outlines to the JavaScript fallback.
+- A timed-out JavaScript request does not disable later fallback requests.
+- Versioned JavaScript diagnostics are ignored when their document version is stale.
+- Invalid request parameters and malformed JSON messages produce protocol errors.
+
 ## 0.3.0
 
 ### Added

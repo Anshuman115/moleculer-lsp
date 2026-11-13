@@ -4,7 +4,6 @@ import { SymbolKind, type Symbol } from '../types.js'
 
 function symbol(fullName: string, fileId: number, name = fullName.split('.').pop() ?? ''): Symbol {
   return {
-    id: 0,
     name,
     fullName,
     namespace: fullName.split('.').slice(0, -1).join('.'),
@@ -20,7 +19,7 @@ describe('Index', () => {
   it('inserts and looks up symbols', () => {
     const index = new Index()
     expect(index.insert(symbol('users.create', 1))).toBe(true)
-    expect(index.lookup('users.create')?.fullName).toBe('users.create')
+    expect(index.lookup('users.create', SymbolKind.Action)?.fullName).toBe('users.create')
   })
 
   it('rejects duplicate full names', () => {
@@ -37,28 +36,29 @@ describe('Index', () => {
     expect(index.allSymbols()).toHaveLength(2)
   })
 
-  it('refreshes the cached symbol list after deleteByFile', () => {
+  it('groups symbols by short name and refreshes the groups after insert', () => {
     const index = new Index()
     index.insert(symbol('users.create', 1))
+    expect(index.named('create').map((entry) => entry.fullName)).toEqual(['users.create'])
     index.insert(symbol('orders.create', 2))
-    expect(index.allSymbols()).toHaveLength(2)
-    index.deleteByFile(1)
-    expect(index.allSymbols()).toHaveLength(1)
-    expect(index.lookup('users.create')).toBeUndefined()
+    expect(index.named('create').map((entry) => entry.fullName)).toEqual(['users.create', 'orders.create'])
+    expect(index.named('missing')).toEqual([])
   })
 
-  it('drops references originating from a deleted file', () => {
+  it('clears symbols and references on rescan but keeps file ids', () => {
     const index = new Index()
-    index.insert(symbol('users.create', 1))
-    index.addReference('users.create', { fileId: 2, line: 5, column: 3 })
-    expect(index.referencesTo('users.create')).toHaveLength(1)
-    index.deleteByFile(2)
-    expect(index.referencesTo('users.create')).toHaveLength(0)
-  })
+    const fileId = index.fileId('/a/users.service.js')
+    const create = symbol('users.create', fileId)
+    index.insert(create)
+    index.addReference(create, { fileId, line: 3, column: 4, length: 6 })
+    expect(index.referencesTo(create)).toHaveLength(1)
 
-  it('reports references only for known symbols', () => {
-    const index = new Index()
-    expect(index.addReference('missing.action', { fileId: 1, line: 0, column: 0 })).toBe(false)
+    index.clear()
+
+    expect(index.lookup('users.create', SymbolKind.Action)).toBeUndefined()
+    expect(index.named('create')).toEqual([])
+    expect(index.referencesTo(create)).toEqual([])
+    expect(index.fileId('/a/users.service.js')).toBe(fileId)
   })
 
   it('reuses ids for identical interned paths', () => {

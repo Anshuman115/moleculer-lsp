@@ -72,7 +72,6 @@ export type DiagnosticSeverity = (typeof DiagnosticSeverity)[keyof typeof Diagno
 
 export const ErrorCodes = {
   ParseError: -32700,
-  InvalidRequest: -32600,
   MethodNotFound: -32601,
   InvalidParams: -32602,
   InternalError: -32603,
@@ -81,4 +80,38 @@ export const ErrorCodes = {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+export function spanRange(line: number, character: number, length: number): Range {
+  return { start: { line, character }, end: { line, character: character + length } }
+}
+
+export function textDocumentOf(params: unknown): { uri: string; text?: unknown } | undefined {
+  const record = isRecord(params) ? params : {}
+  const document = isRecord(record.textDocument) ? record.textDocument : undefined
+  if (document === undefined || typeof document.uri !== 'string') {
+    return undefined
+  }
+  return { uri: document.uri, text: document.text }
+}
+
+export function positionParams(params: unknown): TextDocumentPositionParams | undefined {
+  const uri = textDocumentOf(params)?.uri
+  const position = isRecord(params) && isRecord(params.position) ? params.position : {}
+  const { line, character } = position
+  if (uri === undefined || typeof line !== 'number' || typeof character !== 'number') {
+    return undefined
+  }
+  return { textDocument: { uri }, position: { line, character } }
+}
+
+export function referenceParams(params: unknown): ReferenceParams | undefined {
+  const position = positionParams(params)
+  const context = isRecord(params) && isRecord(params.context) ? params.context : {}
+  return position === undefined ? undefined : { ...position, context: { includeDeclaration: context.includeDeclaration === true } }
+}
+
+export function documentSymbolParams(params: unknown): DocumentSymbolParams | undefined {
+  const uri = textDocumentOf(params)?.uri
+  return uri === undefined ? undefined : { textDocument: { uri } }
 }

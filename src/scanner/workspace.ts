@@ -1,36 +1,61 @@
-import fs from 'node:fs'
-import path from 'node:path'
+import { Index } from '../index/Index.js'
+import { errorMessage, log } from '../log.js'
+import { collectFiles, isMoleculerWorkspace } from './files.js'
+import { Resolution } from './resolution.js'
+import { Scanner, type ScanResult } from './scanner.js'
+import { Watcher } from './watcher.js'
 
-const configFiles = ['moleculer.config.js', 'moleculer.config.cjs', 'moleculer.config.mjs', 'moleculer.config.json', 'moleculer.config.ts']
-const dependencyFields = ['dependencies', 'devDependencies', 'peerDependencies']
+export class Workspace {
+  readonly index = new Index()
+  private readonly scanner = new Scanner(this.index)
+  readonly resolution: Resolution = this.scanner.resolution
+  private readonly watcher = new Watcher(() => this.scan())
+  readonly moleculer: boolean
+  private scanFailure: string | undefined
 
-export function isMoleculerWorkspace(startPath: string): boolean {
-  let dir = path.resolve(startPath)
-  while (true) {
-    if (configFiles.some((name) => fs.existsSync(path.join(dir, name))) || dependsOnMoleculer(dir)) {
-      return true
+  constructor(private readonly rootPath: string, private readonly onScan: (result: ScanResult) => void) {
+    this.moleculer = isMoleculerWorkspace(rootPath)
+  }
+
+  get failure(): string | undefined {
+    return this.scanFailure
+  }
+
+  start(): void {
+    this.scan()
+    if (this.moleculer) {
+      this.watcher.watch(this.rootPath)
+    } else {
+      log(`no moleculer.config.* or moleculer dependency at or above ${this.rootPath}; index disabled`)
     }
-    const parent = path.dirname(dir)
-    if (parent === dir) {
-      return false
-    }
-    dir = parent
   }
-}
 
-function dependsOnMoleculer(dir: string): boolean {
-  let manifest: unknown
-  try {
-    manifest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
-  } catch {
-    return false
+  changed(): void {
+    this.watcher.trigger()
   }
-  if (typeof manifest !== 'object' || manifest === null) {
-    return false
+
+  close(): void {
+    this.watcher.close()
   }
-  const record = manifest as Record<string, unknown>
-  return dependencyFields.some((field) => {
-    const dependencies = record[field]
-    return typeof dependencies === 'object' && dependencies !== null && 'moleculer' in dependencies
-  })
+
+  private files(): string[] {
+    return this.moleculer ? collectFiles(this.rootPath) : []
+  }
+
+  private scan(): void {
+    const started = Date.now()
+    let result: ScanResult
+    try {
+      result = this.scanner.scan(this.files())
+    } catch (error) {
+      this.scanFailure = errorMessage(error)
+      log(`scan failed: ${this.scanFailure}`)
+      return
+    }
+    this.scanFailure = undefined
+    const stats = this.index.stats()
+    log(`indexed ${stats.symbolCount} symbols in ${result.fileCount} files (${Date.now() - started}ms)`)
+    log(`references ${stats.referenceCount}, unresolved ${result.dropped.length}, mixin failures ${result.mixinFailures.length}`)
+    this.onScan(result)
+  }
 }

@@ -1,129 +1,58 @@
-[![npm version](https://img.shields.io/npm/v/moleculer-lsp.svg)](https://www.npmjs.com/package/moleculer-lsp)
-[![npm downloads](https://img.shields.io/npm/dm/moleculer-lsp.svg)](https://www.npmjs.com/package/moleculer-lsp)
-[![license](https://img.shields.io/npm/l/moleculer-lsp.svg)](./LICENSE)
+# Moleculer LSP
 
-# Moleculer Language Server
+[![npm](https://img.shields.io/npm/v/moleculer-lsp)](https://www.npmjs.com/package/moleculer-lsp)
+[![license](https://img.shields.io/npm/l/moleculer-lsp)](./LICENSE)
 
-[Language Server Protocol](https://microsoft.github.io/language-server-protocol/) implementation for [Moleculer.js](https://github.com/moleculerjs/moleculer) microservices.
+Go to definition, find references and diagnostics for [Moleculer.js](https://moleculer.services/) services, actions, events and mixins. Optional JavaScript support uses the bundled [tsrs](https://github.com/oxc-project/tsrs) language server.
 
-- [What is it, exactly?](#what-is-it-exactly)
-- [Installing](#installing)
-- [Running the language server](#running-the-language-server)
-- [CLI Options](#cli-options)
-- [Client setup](#client-setup)
-  - [Claude Code](#claude-code)
-  - [oh-my-pi (omp)](#oh-my-pi-omp)
-  - [Neovim](#neovim)
-  - [Helix](#helix)
-- [Features](#features)
-  - [Resolution](#resolution)
-  - [Diagnostics](#diagnostics)
-  - [TypeScript fallback](#typescript-fallback)
-- [Performance](#performance)
-- [Limitations](#limitations)
-- [Development](#development)
-- [License](#license)
+```js
+ctx.call("orders.create");  // Jump to the action handler
+ctx.emit("order.created");  // Find listeners and emitters
+this.validateOrder();      // Resolve service and mixin methods
+```
 
-## What is it, exactly?
-
-Moleculer connects services through string names (`ctx.call("billing.charge")`, `ctx.emit("user.created")`) and shares behaviour through mixins. A JavaScript language server sees those names as plain strings, so it cannot navigate from a call to the action that handles it.
-
-`moleculer-lsp` indexes services, actions, events, methods, channels and mixins across the workspace. Clients can jump from a `ctx.call` to the action, list the callers of an action or the emitters of an event, and report calls whose target does not exist in the workspace.
-
-In clients that run one language server per file type, such as Claude Code, `moleculer-lsp` can also forward every request it cannot answer to TypeScript. Plain JavaScript navigation, hover and diagnostics then keep working from the same server.
-
-## Installing
+## Install
 
 ```sh
 npm install -g moleculer-lsp
+moleculer-lsp --stdio --typescript-diagnostics
 ```
 
-Node.js 18 or later is required. TypeScript 7 is installed as a dependency and serves plain JavaScript requests when the project provides no TypeScript language server of its own.
-
-## Running the language server
-
-```sh
-moleculer-lsp --stdio
-```
-
-The server speaks LSP over stdin and stdout. Logs go to stderr.
-
-The workspace is indexed when the workspace root or one of its parents contains `moleculer.config.{js,cjs,mjs,json,ts}`, or a `package.json` that lists `moleculer` in `dependencies`, `devDependencies` or `peerDependencies`. Other workspaces are not indexed and get no Moleculer diagnostics. With `--typescript-fallback`, TypeScript answers every request in them.
-
-## CLI Options
-
-```
-Usage: moleculer-lsp [options]
-
-Options:
-  --stdio                    Start the language server over stdio (default)
-  --typescript-fallback      Send requests the index cannot answer, and hover, implementation,
-                             call hierarchy and workspace symbol requests, to TypeScript
-  --typescript-diagnostics   Also report TypeScript diagnostics for open files (implies --typescript-fallback)
-  --scan <dir>               Index a workspace and print a summary
-  --parse <file>             Print symbols and references for one file
-  --version                  Print the version
-  --help                     Print this help
-```
-
-- `--typescript-fallback` is for clients that send each request for a file to one server only. Do not use it in editors that already run a TypeScript server next to `moleculer-lsp` and merge the results.
-- `--typescript-diagnostics` is for clients where `moleculer-lsp` is the only server for `.js` files, such as Claude Code.
-- `--scan` prints file, symbol and reference counts, and unresolved references grouped by reason.
+Requires Node.js 18 or later. tsrs `0.25.0-ts7.1.0-beta` installs with the package and requires its platform-specific optional dependency. Do not install with `--omit=optional`. tsrs is beta; see its [compatibility notes](https://github.com/oxc-project/tsrs/blob/main/docs/COMPATIBILITY.md).
 
 ## Client setup
 
 ### Claude Code
 
 ```sh
-npm install -g moleculer-lsp
 claude plugin marketplace add Anshuman115/moleculer-lsp
 claude plugin install moleculer-lsp@moleculer-tools
 ```
 
-The plugin starts `moleculer-lsp --stdio --typescript-diagnostics` from `PATH`. Claude Code started from a terminal, VS Code, Zed or the Claude desktop app inherits the shell `PATH`.
+The plugin uses the CLI installed above, running `moleculer-lsp --stdio --typescript-diagnostics` from `PATH` for `.js` files. Restart Claude Code after installation or updates.
 
-Claude Code assigns each file extension to the first plugin that registers it, in the order of `enabledPlugins` in `~/.claude/settings.json`. The `typescript-lsp` plugin also registers `.js`, and a new install is added at the end of the list. Move `moleculer-lsp` to the top:
-
-```sh
-jq '.enabledPlugins = ({"moleculer-lsp@moleculer-tools": true} + (.enabledPlugins | del(.["moleculer-lsp@moleculer-tools"])))' \
-  ~/.claude/settings.json > /tmp/settings.json && mv /tmp/settings.json ~/.claude/settings.json
-```
-
-To verify, run `claude --debug-file /tmp/claude.log -p ok` and `grep "extension .js" /tmp/claude.log`. The line must read `.js already handled by "plugin:moleculer-lsp:moleculer"`.
-
-`moleculer-lsp` then serves `.js` files, and `typescript-lsp` keeps `.ts`, `.tsx` and `.jsx`. Moleculer answers take priority; every other request goes to TypeScript. In projects without Moleculer, all requests go to TypeScript unchanged.
+If another plugin also registers `.js`, check the LSP debug logs and ensure Moleculer LSP handles JavaScript. Do not rely on results from both servers being merged. Keep a separate TypeScript server registered for its other extensions.
 
 ### oh-my-pi (omp)
 
-Register the server in `~/.omp/agent/lsp.json`:
+For a JavaScript-only project, add `.omp/lsp.json`:
 
 ```json
 {
   "servers": {
+    "typescript-native": { "disabled": true },
+    "typescript-language-server": { "disabled": true },
     "moleculer": {
       "command": "moleculer-lsp",
-      "args": ["--stdio", "--typescript-fallback"],
+      "args": ["--stdio", "--typescript-diagnostics"],
       "fileTypes": [".js"],
-      "rootMarkers": ["moleculer.config.js"]
+      "rootMarkers": ["package.json", "moleculer.config.js"]
     }
   }
 }
 ```
 
-Use `["package.json"]` as `rootMarkers` for Moleculer projects without `moleculer.config.js`.
-
-omp sends definition and references requests to the first server that accepts the file, and its built-in TypeScript servers come first. In each Moleculer project, add `.omp/lsp.json` so they report diagnostics only:
-
-```json
-{
-  "servers": {
-    "typescript-native": { "isLinter": true },
-    "typescript-language-server": { "isLinter": true }
-  }
-}
-```
-
-omp's TypeScript servers keep reporting diagnostics, so do not add `--typescript-diagnostics` here. Rename is not available for `.js` in this setup. Restart omp after installing or updating `moleculer-lsp`.
+This disables omp's separate TypeScript servers for the project. For mixed-language projects, restrict their `fileTypes` instead. Reload LSP configuration or restart omp. See [omp's configuration reference](https://github.com/can1357/oh-my-pi/blob/main/docs/lsp-config.md).
 
 ### Neovim
 
@@ -131,114 +60,97 @@ Neovim 0.11 or later:
 
 ```lua
 vim.lsp.config('moleculer_lsp', {
-  cmd = { 'moleculer-lsp', '--stdio' },
+  cmd = { 'moleculer-lsp', '--stdio', '--typescript-diagnostics' },
   filetypes = { 'javascript' },
-  root_markers = { 'package.json' },
+  root_markers = { 'package.json', 'moleculer.config.js' },
 })
 vim.lsp.enable('moleculer_lsp')
 ```
 
-### Helix
+Disable other JavaScript servers for these buffers. If your editor already manages JavaScript and merges servers, omit the fallback flags instead.
 
-```toml
-[language-server.moleculer-lsp]
-command = "moleculer-lsp"
-args = ["--stdio"]
+### Other clients
 
-[[language]]
-name = "javascript"
-language-servers = ["typescript-language-server", "moleculer-lsp"]
-```
+Run `moleculer-lsp --stdio --typescript-diagnostics`, use language ID `javascript`, and set `rootUri` to the workspace directory. The server uses full-document text synchronization, pull diagnostics when the client advertises them, and push diagnostics otherwise. Logs go to stderr; stdout carries JSON-RPC only.
 
 ## Features
 
-| LSP method | Behaviour |
+| Feature | Supported forms |
 | --- | --- |
-| `textDocument/definition` | Action strings, event names, `this.method()` calls and mixin methods resolve to their declaration |
-| `textDocument/references` | `ctx.call`, `ctx.emit`, `broker.broadcast`, `this.publish` and `broker.sendToChannel` references, internal calls, and string hooks in named services |
-| `textDocument/documentSymbol` | Outline of a service or mixin: actions, events, methods, channels, mixins and hooks |
-| `textDocument/diagnostic` | Pull diagnostics, for clients that advertise support |
-| `textDocument/publishDiagnostics` | Push diagnostics for open files, for all other clients. Closing a file clears them |
-| `textDocument/hover`, `textDocument/implementation`, call hierarchy, `workspace/symbol` | Forwarded to TypeScript unchanged, with `--typescript-fallback` only |
+| Definitions | Action strings, event and channel names, service and mixin methods |
+| References | Literal calls, emits, broadcasts, channel sends, method calls and string hooks |
+| Document symbols | Services, actions, events, methods, channels, mixins and hooks |
+| Namespaces | Literal service names and numeric versions, including `v2.orders.create` |
+| Mixins | Local `require` bindings and transitive mixin chains |
 
-The index is rebuilt when a file is saved or changes on disk.
+A Moleculer workspace has `moleculer.config.{js,cjs,mjs,json,ts}` or a `package.json` with a Moleculer dependency at its root or an ancestor. Only `.js` source files are indexed.
 
-### Resolution
-
-- `name` and numeric `version` (`v2.users.create`) form the service namespace.
-- Mixins bound to a local `require` are merged into the consuming service, including transitive chains: `const Shared = require("./shared.mixin")` with `mixins: [Shared]`.
-- `ctx.call`, `ctx.emit` and `broker.broadcast` with string-literal names are indexed. `this.publish` and `broker.sendToChannel` also accept template literals without interpolation.
-- `this.method()` and `this.helper.method()` resolve in named services. `this.helper.method()` resolves only to a method of the same service or one of its mixins. Calls on other objects, such as `client.send()`, are left to TypeScript.
-- String hooks (`hooks: { before: { create: ["validate"] } }`) resolve as references in named services.
-- Mixins from npm packages, such as `moleculer-web`, are skipped without a diagnostic.
+With JavaScript fallback enabled, Moleculer answers take priority. Unanswered definitions, references and outlines go to tsrs, along with hover, implementation, call hierarchy and workspace symbol requests. Unrecognized workspaces skip Moleculer indexing; tsrs handles requests there only when a fallback flag is set.
 
 ### Diagnostics
 
 | Condition | Severity |
 | --- | --- |
-| Local mixin `require` path does not resolve to a file | Error |
-| Event name declared in more than one service | Error |
-| Event or channel target cannot be resolved unambiguously | Error |
-| Call to a target absent from the workspace | Hint |
-| Event or channel with no listener in the workspace | Hint |
+| Broken local mixin path | Error |
+| Event name declared by multiple services (each declaration) | Error |
+| Ambiguous event or channel reference | Error |
+| Ambiguous `this.method()` target | Hint |
+| Unknown cross-service target | Hint |
+| Event or channel without a local listener | Hint |
 
-### TypeScript fallback
+Unknown targets may belong to remote services. Third-party npm mixins are not indexed and do not produce missing-path diagnostics.
 
-With `--typescript-fallback`, a definition, references or document symbol request that the Moleculer index cannot answer goes to TypeScript. The server uses the first of:
+## CLI
 
-1. `tsc` 7 or later in the project's `node_modules/.bin`, or on `PATH`, started as `tsc --lsp`
-2. `typescript-language-server` in the project's `node_modules/.bin`, or on `PATH`
-3. TypeScript 7 installed with `moleculer-lsp`
+| Option | Behavior |
+| --- | --- |
+| `--stdio` | Use stdio transport (default) |
+| `--typescript-fallback` | Add JavaScript navigation through tsrs |
+| `--typescript-diagnostics` | Add tsrs diagnostics for open files; implies fallback |
+| `--scan <dir>` | Print workspace index statistics |
+| `--parse <file>` | Print one file's symbols and references |
+| `--version` | Print the version |
+| `--help`, `-h` | Print CLI help |
 
-TypeScript starts on the first request that needs it. With `--typescript-diagnostics`, TypeScript diagnostics for open files are merged with the Moleculer diagnostics.
+Without fallback flags, only Moleculer features are enabled.
 
 ## Performance
 
-Measured with `npm run bench` on an Apple M2 Pro, Node.js 26.8.1 and TypeScript 7.0.2, with `moleculer-lsp --typescript-diagnostics` as Claude Code runs it. Each workspace was run three times; values are medians in milliseconds. Each request type uses 20 positions sampled across the workspace. "First" is the first request at a position; "repeat" is five more requests at the same position. The baseline is `tsc --lsp` alone, pulling diagnostics for each opened file.
+Apple M2 Pro, macOS arm64, Node.js 26.8.1, private Moleculer workspace with 1,139 JavaScript files:
 
-| | Moleculer, 1,139 files | Moleculer, 387 files | Plain JS, 426 files |
-| --- | --- | --- | --- |
-| Index ready after start | 1,312 | 287 | 127 (no index) |
-| Moleculer definition, first p50 / p95 | 2.0 / 13.4 | 0.6 / 20.0 | n/a |
-| Moleculer references, first p50 / p95 | 1.5 / 11.8 | 0.4 / 1.2 | n/a |
-| JS definition, first p50 / p95 | 113 / 846 | 7.7 / 34.8 | 33.7 / 143 |
-| JS definition, first p50 / p95, TypeScript alone | 90 / 192 | 9.3 / 18.1 | 34.5 / 150 |
-| Hover, first p50 / p95 | 7.2 / 101 | 0.5 / 4.0 | 2.2 / 90.1 |
-| Hover, first p50 / p95, TypeScript alone | 8.6 / 121 | 0.7 / 4.3 | 2.4 / 91.6 |
-| Any request, repeat p50 | 0.2 – 1.3 | 0.2 – 0.3 | 0.2 – 0.3 |
-| Edit to TypeScript diagnostics | 13 | 4.5 | n/a |
-| Save to Moleculer diagnostics | 1,478 | 498 | n/a |
-| Server memory (RSS, MB) | 196 | 159 | 64 |
+| Metric | 0.3.0 (published) | 0.4.0 candidate, tsrs |
+| --- | ---: | ---: |
+| Total process-tree RSS, MiB | 2,740.2 | 1,159.6 |
+| Unsaved edit to JS diagnostics, ms | 13.1 | 5.9 |
+| First JS definition per position p50, ms | 131.7 | 64.5 |
+| Save to Moleculer diagnostics (full rescan), ms | 1,501.3 | 1,263.1 |
 
-TypeScript alone answered none of the 20 Moleculer definition requests in either Moleculer workspace.
+Warm Moleculer definition p50 was 1 ms or less in both runs.
 
-A save re-indexes the whole workspace after a 250 ms debounce. Requests that arrive during the re-index wait for it: up to 1.2 s in the 1,139-file workspace and 0.2 s in the 387-file one.
+Single sequential run per version with `--typescript-diagnostics`, normal SDK type resolution, 20 Moleculer call positions, 20 local-import positions and five repeated requests per position. tsrs used default mode and native macOS watching. The 0.3.0 run preceded the candidate; filesystem caches were not reset. RSS is a snapshot after requests and edits, not a peak or memory limit.
+
+Nonempty-response counts matched: 20/20 Moleculer definitions, 20/20 Moleculer references, 17/20 JavaScript definitions and 19/20 hovers. Matching counts do not establish identical results for every position. Other platforms and long-running sessions were not benchmarked.
 
 ## Limitations
 
-- JavaScript only. `.mjs`, `.cjs` and `.ts` files are not scanned.
-- Services must be object literals assigned to `module.exports`. `export default`, `broker.createService()` and class-based services are not indexed.
-- A service `name` must be a string literal and its `version` a number literal.
-- Dynamic names such as `ctx.call(actionName)` are not resolved.
-- The whole workspace is re-indexed on each save. Requests that arrive during a re-index wait for it to finish.
-- No completion, rename or code lens. Hover comes from TypeScript, with `--typescript-fallback` only.
+- Schemas must be object literals assigned to `module.exports`. Class schemas, `export default` and `broker.createService()` are not indexed.
+- Service names and call targets must be literals. Dynamic expressions are not resolved.
+- Saves and watched source changes trigger a full rescan after a 250 ms debounce. Requests wait during the synchronous scan.
+- No completion, rename, code lens or Moleculer-specific hover. Hover requires tsrs fallback.
+- `.ts`, `.jsx`, `.mjs` and `.cjs` are not Moleculer analysis targets.
+- Imported SDK types can consume substantial memory. See [tsrs LSP memory management](https://github.com/oxc-project/tsrs/blob/main/docs/LSP.md#memory-management).
+- One workspace root per server process.
 
 ## Development
 
 ```sh
-git clone https://github.com/Anshuman115/moleculer-lsp
-cd moleculer-lsp
 npm install
+npm run build
+npm test
+npm run bench -- /path/to/workspace
 ```
 
-| Command | Purpose |
-| --- | --- |
-| `npm run build` | Type check, then bundle to `dist/main.js` |
-| `npm test` | Run the unit tests |
-| `npm run dev` | Run the server from source |
-| `npm run bench -- <workspace>` | Benchmark `dist/main.js` against TypeScript alone on a workspace |
-
-`npm publish` runs the build and the tests first.
+The benchmark compares the combined server and tsrs alone, each with and without JavaScript diagnostics. Edits use unsaved overlays; workspace source files are not written.
 
 ## License
 
